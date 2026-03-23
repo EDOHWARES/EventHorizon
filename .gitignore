@@ -1,6 +1,7 @@
 # Server
 .env
 node_modules/
+backend/logs/
 dist/
 .DS_Store
 
