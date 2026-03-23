@@ -37,6 +37,10 @@ npm run dev:backend
 npm run dev:frontend
 ```
 
+### API Documentation
+- Interactive Swagger UI is available at `/api/docs` when the backend is running.
+- Raw OpenAPI JSON is available at `/api/docs/openapi.json`.
+
 ## 🧪 Testing with the Boilerplate Contract
 1. Deploy the contract in `/contracts`.
 2. Copy the Contract ID.

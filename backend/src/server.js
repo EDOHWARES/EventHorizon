@@ -11,7 +11,28 @@ app.use(cors());
 app.use(express.json());
 
 // Routes
+app.use('/api/docs', require('./routes/docs.routes'));
 app.use('/api/triggers', require('./routes/trigger.routes'));
+/**
+ * @openapi
+ * /api/health:
+ *   get:
+ *     summary: Health check
+ *     description: Confirm that the API process is running and able to serve requests.
+ *     tags:
+ *       - Health
+ *     responses:
+ *       200:
+ *         description: API is healthy.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: ok
+ */
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
 // Database Connection
