@@ -12,6 +12,7 @@ app.use(express.json());
 
 // Routes
 app.use('/api/docs', require('./routes/docs.routes'));
+app.use('/api/auth', require('./routes/auth.routes')); //Added auth.routes
 app.use('/api/triggers', require('./routes/trigger.routes'));
 /**
  * @openapi
