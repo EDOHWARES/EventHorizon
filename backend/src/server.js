@@ -1,45 +1,7 @@
-const express = require('express');
-const cors = require('cors');
 const mongoose = require('mongoose');
 require('dotenv').config();
-const {
-    globalRateLimiter,
-    authRateLimiter,
-} = require('./middleware/rateLimit.middleware');
-
-const app = express();
+const app = require('./app');
 const PORT = process.env.PORT || 5000;
-
-// Middleware
-app.use(cors());
-app.use(express.json());
-app.use(globalRateLimiter);
-app.use('/api/auth', authRateLimiter);
-
-// Routes
-app.use('/api/docs', require('./routes/docs.routes'));
-app.use('/api/triggers', require('./routes/trigger.routes'));
-/**
- * @openapi
- * /api/health:
- *   get:
- *     summary: Health check
- *     description: Confirm that the API process is running and able to serve requests.
- *     tags:
- *       - Health
- *     responses:
- *       200:
- *         description: API is healthy.
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: ok
- */
-app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
 // Database Connection
 mongoose.connect(process.env.MONGO_URI)

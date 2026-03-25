@@ -1,29 +1,32 @@
 const Trigger = require('../models/trigger.model');
+const AppError = require('../utils/appError');
+const asyncHandler = require('../utils/asyncHandler');
 
-exports.createTrigger = async (req, res) => {
-    try {
-        const trigger = new Trigger(req.body);
-        await trigger.save();
-        res.status(201).json(trigger);
-    } catch (error) {
-        res.status(400).json({ error: error.message });
-    }
-};
+exports.createTrigger = asyncHandler(async (req, res) => {
+    const trigger = new Trigger(req.body);
+    await trigger.save();
 
-exports.getTriggers = async (req, res) => {
-    try {
-        const triggers = await Trigger.find();
-        res.json(triggers);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-};
+    res.status(201).json({
+        success: true,
+        data: trigger,
+    });
+});
 
-exports.deleteTrigger = async (req, res) => {
-    try {
-        await Trigger.findByIdAndDelete(req.params.id);
-        res.status(204).send();
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+exports.getTriggers = asyncHandler(async (_req, res) => {
+    const triggers = await Trigger.find();
+
+    res.json({
+        success: true,
+        data: triggers,
+    });
+});
+
+exports.deleteTrigger = asyncHandler(async (req, res) => {
+    const trigger = await Trigger.findByIdAndDelete(req.params.id);
+
+    if (!trigger) {
+        throw new AppError('Trigger not found', 404);
     }
-};
+
+    res.status(204).send();
+});
