@@ -10,6 +10,7 @@ members = [
     "dao_governance",
     "lending_base",
     "subscriptions",
+    "nft_factory",
 ]
 
 [profile.release]
