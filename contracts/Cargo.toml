@@ -13,6 +13,7 @@ members = [
     "nft_factory",
     "multisig_wallet",
     "yield_vault",
+    "prediction_market",
 ]
 
 [profile.release]
