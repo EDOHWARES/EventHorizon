@@ -1,0 +1,6 @@
+node_modules
+.env
+.env.*
+npm-debug.log*
+__tests__
+*.test.js

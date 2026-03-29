@@ -1,5 +1,5 @@
 [package]
-name = "nft-factory"
+name = "nft_factory"
 version = "0.1.0"
 edition = "2021"
 
