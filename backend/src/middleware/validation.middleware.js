@@ -1,13 +1,40 @@
 const Joi = require('joi');
+const {
+    validateFilters,
+    MAX_FILTERS_PER_TRIGGER,
+} = require('../utils/jsonpathValidator');
+
+const filterSchema = Joi.object({
+    path: Joi.string().trim().required(),
+    operator: Joi.string()
+        .valid('eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains', 'in', 'exists')
+        .required(),
+    value: Joi.any(),
+});
+
+const filtersSchema = Joi.array()
+    .items(filterSchema)
+    .max(MAX_FILTERS_PER_TRIGGER)
+    .custom((value, helpers) => {
+        const result = validateFilters(value);
+        if (!result.ok) {
+            return helpers.error('any.invalid', { message: result.error });
+        }
+        return value;
+    }, 'JSONPath security validation')
+    .messages({
+        'any.invalid': '{{#message}}',
+    });
 
 const validationSchemas = {
     triggerCreate: Joi.object({
         contractId: Joi.string().trim().required(),
         eventName: Joi.string().trim().required(),
-        actionType: Joi.string().valid('webhook', 'discord', 'email').default('webhook'),
+        actionType: Joi.string().valid('webhook', 'discord', 'email', 'telegram').default('webhook'),
         actionUrl: Joi.string().trim().uri().required(),
         isActive: Joi.boolean().default(true),
         lastPolledLedger: Joi.number().integer().min(0).default(0),
+        filters: filtersSchema.default([]),
     }),
     authCredentials: Joi.object({
         email: Joi.string().trim().email().required(),

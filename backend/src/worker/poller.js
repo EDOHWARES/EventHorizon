@@ -1,6 +1,7 @@
 const { rpc, xdr } = require('@stellar/stellar-sdk');
 const Trigger = require('../models/trigger.model');
 const logger = require('../config/logger');
+const { passesFilters } = require('../utils/filterEvaluator');
 
 const RPC_URL = process.env.SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org';
 const server = new rpc.Server(RPC_URL, {
@@ -242,6 +243,14 @@ async function pollEvents() {
                         for (const event of response.events) {
                             // Ensure the event falls within our intended window
                             if (event.ledger <= endLedger) {
+                                if (!passesFilters(event, trigger.filters)) {
+                                    logger.debug('Event filtered out by trigger filters', {
+                                        triggerId: trigger._id,
+                                        eventId: event.id,
+                                        eventLedger: event.ledger,
+                                    });
+                                    continue;
+                                }
                                 foundEvents++;
                                 const result = await executeWithRetry(trigger, event);
 
