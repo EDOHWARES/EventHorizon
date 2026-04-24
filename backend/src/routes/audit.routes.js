@@ -334,4 +334,37 @@ router.get('/logs/:logId/verify', auditController.verifyLogIntegrity);
  */
 router.get('/verify', auditController.bulkVerifyIntegrity);
 
+/**
+ * @openapi
+ * /api/admin/audit/archive/search:
+ *   get:
+ *     summary: Search archived audit logs
+ *     description: Admin-only endpoint to search audit logs in cold storage
+ *     tags: [Admin, Audit]
+ *     security:
+ *       - adminAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: query
+ *         schema:
+ *           type: string
+ *         description: Search query
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Start date for search
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: End date for search
+ *     responses:
+ *       200:
+ *         description: Archive search results
+ */
+router.get('/archive/search', auditController.searchArchive);
+
 module.exports = router;
