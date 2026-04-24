@@ -12,6 +12,7 @@ pub enum DataKey {
     CliffTime,
     EndTime,
     ClaimedAmount,
+    ClawbackAdmin,
 }
 
 #[contract]
@@ -28,6 +29,7 @@ impl TokenVesting {
     /// * `start_ts` - The Unix timestamp when the vesting begins.
     /// * `cliff_ts` - The Unix timestamp before which no tokens can be claimed (cliff period).
     /// * `end_ts` - The Unix timestamp when all tokens will be fully vested.
+    /// * `clawback_admin` - The address authorized to reclaim unvested tokens.
     pub fn initialize(
         env: Env,
         recipient: Address,
@@ -36,6 +38,7 @@ impl TokenVesting {
         start_ts: u64,
         cliff_ts: u64,
         end_ts: u64,
+        clawback_admin: Address,
     ) {
         if env.storage().instance().has(&DataKey::Init) {
             panic!("Contract already initialized");
@@ -58,8 +61,9 @@ impl TokenVesting {
         env.storage().instance().set(&DataKey::CliffTime, &cliff_ts);
         env.storage().instance().set(&DataKey::EndTime, &end_ts);
         env.storage().instance().set(&DataKey::ClaimedAmount, &0i128);
+        env.storage().instance().set(&DataKey::ClawbackAdmin, &clawback_admin);
 
-        log!(&env, "Vesting initialized", recipient, total_amount);
+        log!(&env, "Vesting initialized", recipient, total_amount, clawback_admin);
     }
 
     /// Claims all currently vested tokens for the recipient.
@@ -86,20 +90,48 @@ impl TokenVesting {
 
         let token_addr: Address = env.storage().instance().get(&DataKey::Token).expect("No token registered");
         let token_client = token::Client::new(&env, &token_addr);
-        
-        // Transfer tokens from this contract to the recipient
+
+        // Update state before external token transfer to prevent re-entrancy.
+        env.storage().instance().set(&DataKey::ClaimedAmount, &(claimed + claimable));
         token_client.transfer(&env.current_contract_address(), &recipient, &claimable);
 
-        // Update the claimed amount
-        env.storage().instance().set(&DataKey::ClaimedAmount, &(claimed + claimable));
-
-        // Emit an event for transparency
         env.events().publish(
             (Symbol::new(&env, "vesting_claimed"), recipient),
-            claimable
+            claimable,
         );
 
         claimable
+    }
+
+    /// Reclaims all currently unvested tokens to the authorized clawback admin or destination.
+    ///
+    /// Only the configured clawback admin may call this function.
+    pub fn clawback(env: Env, destination: Address) -> i128 {
+        let admin: Address = env.storage().instance().get(&DataKey::ClawbackAdmin).expect("Not initialized");
+        admin.require_auth();
+
+        let now = env.ledger().timestamp();
+        let total_amount: i128 = env.storage().instance().get(&DataKey::TotalAmount).unwrap_or(0);
+        let vested = Self::vested_amount_at(&env, now);
+        let unvested = total_amount - vested;
+        if unvested <= 0 {
+            return 0;
+        }
+
+        // Freeze future vesting and ensure state reflects reclaimed unvested tokens.
+        env.storage().instance().set(&DataKey::TotalAmount, &vested);
+        env.storage().instance().set(&DataKey::EndTime, &now);
+
+        let token_addr: Address = env.storage().instance().get(&DataKey::Token).expect("No token registered");
+        let token_client = token::Client::new(&env, &token_addr);
+        token_client.transfer(&env.current_contract_address(), &destination, &unvested);
+
+        env.events().publish(
+            (Symbol::new(&env, "vesting_clawed_back"), admin, destination),
+            unvested,
+        );
+
+        unvested
     }
 
     /// Returns the total amount of tokens vested up to the current timestamp.

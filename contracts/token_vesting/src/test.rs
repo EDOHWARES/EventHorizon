@@ -27,13 +27,22 @@ fn test_linear_vesting_flow() {
     let start_ts = 1000;
     let cliff_ts = 1500;
     let end_ts = 2000;
+    let clawback_admin = employer.clone();
     
     // 1. Initial funding: mint tokens to the vesting contract
     token_admin.mint(&contract_id, &total_amount);
     assert_eq!(token.balance(&contract_id), total_amount);
     
     // 2. Initialize the contract
-    client.initialize(&recipient, &token_addr, &total_amount, &start_ts, &cliff_ts, &end_ts);
+    client.initialize(
+        &recipient,
+        &token_addr,
+        &total_amount,
+        &start_ts,
+        &cliff_ts,
+        &end_ts,
+        &clawback_admin,
+    );
 
     // 3. Test before start
     env.ledger().set_timestamp(500);
@@ -94,8 +103,9 @@ fn test_double_initialization() {
     let client = TokenVestingClient::new(&env, &contract_id);
     let addr = Address::generate(&env);
 
-    client.initialize(&addr, &addr, &1000, &100, &100, &200);
-    client.initialize(&addr, &addr, &1000, &100, &100, &200);
+    let clawback_admin = Address::generate(&env);
+    client.initialize(&addr, &addr, &1000, &100, &100, &200, &clawback_admin);
+    client.initialize(&addr, &addr, &1000, &100, &100, &200, &clawback_admin);
 }
 
 #[test]
@@ -108,12 +118,71 @@ fn test_unauthorized_claim() {
     let contract_id = env.register(TokenVesting, ());
     let client = TokenVestingClient::new(&env, &contract_id);
     let token_addr = Address::generate(&env);
+    let clawback_admin = Address::generate(&env);
 
-    client.initialize(&recipient, &token_addr, &1000, &100, &100, &200);
+    client.initialize(&recipient, &token_addr, &1000, &100, &100, &200, &clawback_admin);
     
     // Attacker tries to claim (will fail because mock_all_auths is not called or recipient didn't sign)
-    // Actually, without mock_all_auths, require_auth will fail for any address unless we provide auth.
     client.claim(); 
+}
+
+#[test]
+fn test_clawback_by_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let recipient = Address::generate(&env);
+    let employer = Address::generate(&env);
+    let token_addr = env.register_stellar_asset_contract_v2(employer.clone()).address();
+    let token_admin = StellarAssetClient::new(&env, &token_addr);
+    let token = TokenClient::new(&env, &token_addr);
+    let contract_id = env.register(TokenVesting, ());
+    let client = TokenVestingClient::new(&env, &contract_id);
+
+    let total_amount = 1_000_000_i128;
+    let start_ts = 100;
+    let cliff_ts = 200;
+    let end_ts = 300;
+    let clawback_admin = employer.clone();
+
+    token_admin.mint(&contract_id, &total_amount);
+    client.initialize(
+        &recipient,
+        &token_addr,
+        &total_amount,
+        &start_ts,
+        &cliff_ts,
+        &end_ts,
+        &clawback_admin,
+    );
+
+    env.ledger().set_timestamp(250);
+    assert_eq!(client.get_vested_amount(), 150_000_i128);
+
+    let reclaim_destination = Address::generate(&env);
+    let reclaimed = client.clawback(&reclaim_destination);
+    assert_eq!(reclaimed, 850_000_i128);
+    assert_eq!(token.balance(&reclaim_destination), 850_000_i128);
+    assert_eq!(client.get_vested_amount(), 150_000_i128);
+    assert_eq!(client.get_claimable_amount(), 150_000_i128);
+}
+
+#[test]
+#[should_panic]
+fn test_unauthorized_clawback() {
+    let env = Env::default();
+    let recipient = Address::generate(&env);
+    let attacker = Address::generate(&env);
+    let token_addr = Address::generate(&env);
+    let clawback_admin = Address::generate(&env);
+
+    let contract_id = env.register(TokenVesting, ());
+    let client = TokenVestingClient::new(&env, &contract_id);
+
+    client.initialize(&recipient, &token_addr, &1000, &100, &150, &200, &clawback_admin);
+
+    // Attacker tries to reclaim tokens without admin authorization.
+    client.clawback(&attacker);
 }
 
 #[test]
@@ -123,8 +192,9 @@ fn test_get_info() {
     let contract_id = env.register(TokenVesting, ());
     let client = TokenVestingClient::new(&env, &contract_id);
     let token_addr = Address::generate(&env);
+    let clawback_admin = Address::generate(&env);
 
-    client.initialize(&recipient, &token_addr, &1000, &100, &150, &200);
+    client.initialize(&recipient, &token_addr, &1000, &100, &150, &200, &clawback_admin);
     
     let (addr, total, claimed, start, end) = client.get_info();
     assert_eq!(addr, recipient);
