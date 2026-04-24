@@ -1,0 +1,13 @@
+Found 2 open PRs.
+error: remote auth-origin already exists.
+
+Processing PR #230: Contract: Trusted Event Emitter Registry and Curation
+- Commented.
+- Conflict/Mergeability issue. Attempting manual merge...
+From https://github.com/EDOHWARES/EventHorizon
+ * [new ref]         refs/pull/230/head -> pr-230
+Already on 'main'
+From https://github.com/EDOHWARES/EventHorizon
+ * branch            main       -> FETCH_HEAD
+  - Resolving conflicts by preferring contributor changes (theirs)...
+Updated 1 path from the index

@@ -3,7 +3,6 @@ resolver = "2"
 members = [
     "airdrop",
     "boilerplate",
-    "soulbound_badge",
     "token_vesting",
     "staking",
     "escrow",
@@ -15,7 +14,7 @@ members = [
     "multisig_wallet",
     "yield_vault",
     "prediction_market",
-    "event_proxy",
+    "emitter_registry",
 ]
 
 [profile.release]
