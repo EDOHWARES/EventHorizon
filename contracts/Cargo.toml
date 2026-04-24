@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "airdrop",
     "boilerplate",
+    "soulbound_badge",
     "token_vesting",
     "staking",
     "escrow",
