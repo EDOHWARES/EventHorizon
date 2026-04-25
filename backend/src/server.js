@@ -70,6 +70,14 @@ mongoose
         const eventPoller = require('./worker/poller');
         eventPoller.start();
 
+        // Start data retention job
+        const retentionService = require('./services/retention.service');
+        setInterval(() => {
+            retentionService.archiveOldLogs().catch(error => {
+                logger.error('Data retention job failed', { error: error.message });
+            });
+        }, 24 * 60 * 60 * 1000); // Run daily
+
         app.listen(PORT, () => {
             logger.info('Server started successfully', {
                 port: PORT,
