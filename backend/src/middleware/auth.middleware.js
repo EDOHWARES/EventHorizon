@@ -1,8 +1,9 @@
 const jwt = require('jsonwebtoken');
+const User = require('../models/user.model');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret';
 
-module.exports = function (req, res, next) {
+module.exports = async function (req, res, next) {
   try {
     const authHeader = req.headers.authorization;
 
@@ -13,7 +14,19 @@ module.exports = function (req, res, next) {
 
     const decoded = jwt.verify(token, JWT_SECRET);
 
-    req.user = decoded;
+    // Populate user with organization and role
+    const user = await User.findById(decoded.id).populate('organization role');
+    if (!user || !user.isActive) {
+      return res.status(401).json({ error: 'User not found or inactive' });
+    }
+
+    req.user = {
+      id: user._id,
+      email: user.email,
+      organization: user.organization,
+      role: user.role,
+      permissions: user.role.permissions,
+    };
 
     next();
   } catch (error) {

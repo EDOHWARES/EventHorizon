@@ -34,7 +34,7 @@ const checkQueueAvailable = (req, res, next) => {
  *       503:
  *         description: Queue system not available (Redis not configured)
  */
-router.get('/stats', checkQueueAvailable, queueController?.getStats);
+router.get('/stats', checkQueueAvailable, queueController?.getStats || ((req, res) => res.status(503).json({ error: 'Queue service unavailable' })));
 
 /**
  * @swagger
@@ -61,7 +61,7 @@ router.get('/stats', checkQueueAvailable, queueController?.getStats);
  *       503:
  *         description: Queue system not available (Redis not configured)
  */
-router.get('/jobs', checkQueueAvailable, queueController?.getJobs);
+router.get('/jobs', checkQueueAvailable, queueController?.getJobs || ((req, res) => res.status(503).json({ error: 'Queue service unavailable' })));
 
 /**
  * @swagger
@@ -75,7 +75,7 @@ router.get('/jobs', checkQueueAvailable, queueController?.getJobs);
  *       503:
  *         description: Queue system not available (Redis not configured)
  */
-router.post('/clean', checkQueueAvailable, queueController?.clean);
+router.post('/clean', checkQueueAvailable, queueController?.clean || ((req, res) => res.status(503).json({ error: 'Queue service unavailable' })));
 
 /**
  * @swagger
@@ -98,7 +98,7 @@ router.post('/clean', checkQueueAvailable, queueController?.clean);
  *       503:
  *         description: Queue system not available (Redis not configured)
  */
-router.post('/jobs/:jobId/retry', checkQueueAvailable, queueController?.retryJob);
+router.post('/jobs/:jobId/retry', checkQueueAvailable, queueController?.retryJob || ((req, res) => res.status(503).json({ error: 'Queue service unavailable' })));
 
 /**
  * @swagger
@@ -110,7 +110,7 @@ router.post('/jobs/:jobId/retry', checkQueueAvailable, queueController?.retryJob
  *       200:
  *         description: Batch statistics retrieved successfully
  */
-router.get('/batches/stats', queueController?.getBatchStats);
+router.get('/batches/stats', queueController?.getBatchStats || ((req, res) => res.status(503).json({ error: 'Queue service unavailable' })));
 
 /**
  * @swagger
@@ -122,6 +122,6 @@ router.get('/batches/stats', queueController?.getBatchStats);
  *       200:
  *         description: All pending batches flushed successfully
  */
-router.post('/batches/flush', queueController?.flushBatches);
+router.post('/batches/flush', queueController?.flushBatches || ((req, res) => res.status(503).json({ error: 'Queue service unavailable' })));
 
 module.exports = router;

@@ -40,6 +40,31 @@ const validationSchemas = {
         email: Joi.string().trim().email().required(),
         password: Joi.string().min(8).required(),
     }),
+    register: Joi.object({
+        email: Joi.string().trim().email().required(),
+        password: Joi.string().min(8).required(),
+        firstName: Joi.string().trim().required(),
+        lastName: Joi.string().trim().required(),
+        organizationName: Joi.string().trim().required(),
+    }),
+    inviteUser: Joi.object({
+        email: Joi.string().trim().email().required(),
+        roleId: Joi.string().trim().required(),
+    }),
+    acceptInvitation: Joi.object({
+        token: Joi.string().trim().required(),
+        password: Joi.string().min(8).required(),
+        firstName: Joi.string().trim().required(),
+        lastName: Joi.string().trim().required(),
+    }),
+    createRole: Joi.object({
+        name: Joi.string().trim().required(),
+        description: Joi.string().trim(),
+        permissions: Joi.array().items(Joi.string().valid(
+            'create_trigger', 'read_trigger', 'update_trigger', 'delete_trigger',
+            'manage_users', 'manage_organization', 'view_audit_logs'
+        )).required(),
+    }),
 };
 
 const mapValidationErrors = (details) =>

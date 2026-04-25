@@ -17,21 +17,9 @@ class AuditMiddleware {
 
     /**
      * Extract user identifier from request
-     * For now, uses IP + User-Agent combination
-     * Can be extended with proper authentication
      */
     getUserIdentifier(req) {
-        const ip = req.ip || req.connection.remoteAddress;
-        const userAgent = req.get('User-Agent') || 'Unknown';
-
-        // Create a hash-based identifier for privacy
-        const crypto = require('crypto');
-        const identifier = crypto.createHash('sha256')
-            .update(`${ip}:${userAgent}`)
-            .digest('hex')
-            .substring(0, 16);
-
-        return identifier;
+        return req.user ? req.user.id : null;
     }
 
     /**
@@ -82,6 +70,7 @@ class AuditMiddleware {
                 operation,
                 resourceType: 'Trigger',
                 resourceId,
+                organization: req.user.organization._id,
                 userId,
                 userAgent: req.get('User-Agent'),
                 ipAddress,

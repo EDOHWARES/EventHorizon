@@ -116,10 +116,17 @@ mongoose
         });
     })
     .catch((err) => {
-        logger.error('MongoDB connection failed', {
+        logger.error('MongoDB connection failed, starting server without DB', {
             error: err.message,
-            stack: err.stack,
             database: 'MongoDB',
         });
-        process.exit(1);
+
+        // Start server even without DB for testing
+        app.listen(PORT, () => {
+            logger.warn('Server started without database connection', {
+                port: PORT,
+                environment: process.env.NODE_ENV || 'development',
+                healthCheck: `http://localhost:${PORT}/api/health`,
+            });
+        });
     });
