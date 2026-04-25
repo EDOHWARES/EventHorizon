@@ -32,15 +32,35 @@ app.use('/api/admin/audit', require('./routes/audit.routes'));
  */
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
+app.get('/api/health/poller', (req, res) => {
+    try {
+        const pollerState = require('./worker/pollerState');
+        res.json({
+            status: 'ok',
+            poller: pollerState.getState()
+        });
+    } catch (e) {
+        res.status(500).json({ status: 'error', error: e.message });
+    }
+});
+
 // Database Connection
 mongoose
     .connect(process.env.MONGO_URI)
-    .then(() => {
+    .then(async () => {
         logger.info('Connected to MongoDB', {
             database: 'MongoDB',
             status: 'connected',
             uri: process.env.MONGO_URI?.replace(/\/\/.*@/, '//***@'),
         });
+
+        // Initialize Vault
+        try {
+            const vaultService = require('./services/vault.service');
+            await vaultService.initialize();
+        } catch (error) {
+            logger.error('Vault initialization failed', { error: error.message });
+        }
 
         let worker = null;
 
@@ -57,6 +77,14 @@ mongoose
 
         const eventPoller = require('./worker/poller');
         eventPoller.start();
+
+        // Start data retention job
+        const retentionService = require('./services/retention.service');
+        setInterval(() => {
+            retentionService.archiveOldLogs().catch(error => {
+                logger.error('Data retention job failed', { error: error.message });
+            });
+        }, 24 * 60 * 60 * 1000); // Run daily
 
         app.listen(PORT, () => {
             logger.info('Server started successfully', {

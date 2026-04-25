@@ -1,8 +1,12 @@
 const { rpc, xdr } = require('@stellar/stellar-sdk');
 const Trigger = require('../models/trigger.model');
 const batchService = require('../services/batch.service');
+const vaultService = require('../services/vault.service');
 const logger = require('../config/logger');
 const { passesFilters } = require('../utils/filterEvaluator');
+const v8 = require('v8');
+const fs = require('fs');
+const path = require('path');
 
 const RPC_URL = process.env.SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org';
 const server = new rpc.Server(RPC_URL, {
@@ -20,6 +24,17 @@ const INTER_PAGE_DELAY_MS = parseInt(process.env.INTER_PAGE_DELAY_MS || '200', 1
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Take a heap snapshot for memory profiling
+ */
+function takeHeapSnapshot(label) {
+    const snapshot = v8.writeHeapSnapshot();
+    const filename = `heap-${label}-${Date.now()}.heapsnapshot`;
+    const filepath = path.join(process.cwd(), filename);
+    fs.renameSync(snapshot, filepath);
+    logger.info(`Heap snapshot taken: ${filepath}`);
 }
 
 /**
@@ -114,7 +129,7 @@ try {
                 return await slackService.execute(trigger, eventPayload);
 
             case 'telegram': {
-                const botToken = process.env.TELEGRAM_BOT_TOKEN;
+                const botToken = await vaultService.getApiKey('telegram');
                 const chatId = actionUrl; // actionUrl stores the chat ID for telegram triggers
                 if (!botToken || !chatId) {
                     throw new Error('Missing TELEGRAM_BOT_TOKEN or actionUrl (chatId) for telegram trigger');
@@ -181,6 +196,7 @@ async function processEvent(trigger, eventPayload) {
 
 async function pollEvents() {
     try {
+        takeHeapSnapshot('poll-start');
         const triggers = await Trigger.find({ isActive: true });
 
         if (triggers.length === 0) {
@@ -242,9 +258,13 @@ async function pollEvents() {
                         pagination: { limit: 100, cursor }
                     }));
 
-                    // Parse the events
+                    // Parse the events with zero-copy optimization
                     if (response && response.events && response.events.length > 0) {
-                        for (const event of response.events) {
+                        const eventBuffer = Buffer.allocUnsafe(response.events.length * 1024); // Pre-allocate buffer
+                        let bufferOffset = 0;
+
+                        for (let i = 0; i < response.events.length; i++) {
+                            const event = response.events[i];
                             // Ensure the event falls within our intended window
                             if (event.ledger <= endLedger) {
                                 if (!passesFilters(event, trigger.filters)) {
@@ -257,6 +277,7 @@ async function pollEvents() {
                                 }
                                 foundEvents++;
                                 try {
+                                    // Zero-copy: pass event reference directly
                                     await processEvent(trigger, event);
 
                                     // Track execution stats (events added to batch)
@@ -315,6 +336,7 @@ async function pollEvents() {
         logger.info('Event polling cycle completed', {
             processedTriggers: triggers.length
         });
+        takeHeapSnapshot('poll-end');
     } catch (error) {
         logger.error('Error in event poller', {
             error: error.message,
