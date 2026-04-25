@@ -1,6 +1,7 @@
 const { rpc, xdr } = require('@stellar/stellar-sdk');
 const Trigger = require('../models/trigger.model');
 const batchService = require('../services/batch.service');
+const vaultService = require('../services/vault.service');
 const logger = require('../config/logger');
 const { passesFilters } = require('../utils/filterEvaluator');
 const v8 = require('v8');
@@ -128,7 +129,7 @@ try {
                 return await slackService.execute(trigger, eventPayload);
 
             case 'telegram': {
-                const botToken = process.env.TELEGRAM_BOT_TOKEN;
+                const botToken = await vaultService.getApiKey('telegram');
                 const chatId = actionUrl; // actionUrl stores the chat ID for telegram triggers
                 if (!botToken || !chatId) {
                     throw new Error('Missing TELEGRAM_BOT_TOKEN or actionUrl (chatId) for telegram trigger');
