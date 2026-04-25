@@ -17,6 +17,7 @@ members = [
     "prediction_market",
     "prediction_resolution_engine",
     "emitter_registry",
+    "cross_chain_bridge",
 ]
 
 [profile.release]
