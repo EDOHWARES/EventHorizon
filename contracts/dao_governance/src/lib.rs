@@ -6,13 +6,20 @@ use soroban_sdk::{contract, contractevent, contractimpl, contracttype, token, Ad
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProposalStatus {
-    Pending,
-    Active,
-    Succeeded,
-    Failed,
-    Queued,
-    Executed,
-    Expired,
+    Proposed,  // Initial state after creation
+    Open,      // Voting is ongoing
+    Closed,    // Voting has ended (includes both passed and failed)
+    Executed,  // Proposal has been executed
+    Expired,   // Voting period expired without meeting quorum/majority
+}
+
+// Legacy states for backward compatibility
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ProposalOutcome {
+    Pending,   // Not yet in voting
+    Succeeded, // Passed voting
+    Failed,    // Failed voting
 }
 
 #[contracttype]
@@ -27,6 +34,7 @@ pub struct Proposal {
     pub end_block: u32,
     pub execution_time: u64, // Timelock execution timestamp
     pub executed: bool,
+    pub outcome: ProposalOutcome, // Tracks if proposal passed or failed voting
 }
 
 /// Tracks cumulative voter participation for external reward systems.
@@ -81,6 +89,49 @@ pub struct PowerSnapshot {
 
 // ── Events ──────────────────────────────────────────────────────────────────
 
+/// Emitted when a proposal is created (enters Proposed state).
+#[contractevent]
+pub struct ProposalCreated {
+    pub proposal_id: u64,
+    pub proposer: Address,
+    pub description: Symbol,
+    pub start_block: u32,
+    pub end_block: u32,
+}
+
+/// Emitted when voting on a proposal begins (transitions to Open state).
+#[contractevent]
+pub struct ProposalOpened {
+    pub proposal_id: u64,
+    pub ledger_sequence: u32,
+}
+
+/// Emitted when voting on a proposal ends (transitions to Closed state).
+#[contractevent]
+pub struct ProposalClosed {
+    pub proposal_id: u64,
+    pub votes_for: i128,
+    pub votes_against: i128,
+    pub passed: bool,
+    pub ledger_sequence: u32,
+}
+
+/// Emitted when a vote is cast on a proposal.
+#[contractevent]
+pub struct VoteCast {
+    pub proposal_id: u64,
+    pub voter: Address,
+    pub support: bool,
+    pub weight: i128,
+}
+
+/// Emitted when a proposal transitions to executed state.
+#[contractevent]
+pub struct ProposalExecuted {
+    pub proposal_id: u64,
+    pub executed_at: u64,
+}
+
 /// Emitted per-voter after a proposal reaches consensus (queued).
 /// External reward systems can consume this to distribute participation rewards.
 #[contractevent]
@@ -98,6 +149,7 @@ pub struct DelegationChanged {
     pub delegator: Address,
     pub old_delegatee: Option<Address>,
     pub new_delegatee: Address,
+    pub delegated_power: i128,
 }
 
 /// Emitted when delegation is removed.
@@ -105,9 +157,10 @@ pub struct DelegationChanged {
 pub struct DelegationRemoved {
     pub delegator: Address,
     pub former_delegatee: Address,
+    pub delegated_power: i128,
 }
 
-/// Emitted when a voting power snapshot is taken.
+/// Emitted when voting power snapshot is taken.
 #[contractevent]
 pub struct SnapshotCreated {
     pub snapshot_id: u64,
@@ -194,6 +247,7 @@ impl DaoGovernance {
             end_block,
             execution_time: 0,
             executed: false,
+            outcome: ProposalOutcome::Pending,
         };
 
         // Initialize empty voter list for this proposal
@@ -201,6 +255,16 @@ impl DaoGovernance {
         env.storage().instance().set(&DataKey::ProposalCount, &proposal_id);
         env.storage().persistent().set(&DataKey::ProposalVoters(proposal_id), &Vec::<Address>::new(&env));
 
+        // Emit ProposalCreated event
+        env.events().publish_event(&ProposalCreated {
+            proposal_id,
+            proposer,
+            description,
+            start_block,
+            end_block,
+        });
+
+        // Emit legacy event for backward compatibility
         env.events().publish(
             (Symbol::new(&env, "proposal_created"), proposal_id),
             (proposer, description)
@@ -219,8 +283,13 @@ impl DaoGovernance {
             .expect("Proposal not found");
 
         let current_block = env.ledger().sequence();
-        if current_block < proposal.start_block || current_block > proposal.end_block {
-            panic!("Voting is not active");
+        
+        // Ensure voting is in the Open state
+        if current_block < proposal.start_block {
+            panic!("Voting not yet started");
+        }
+        if current_block > proposal.end_block {
+            panic!("Voting has ended");
         }
 
         let voted_key = DataKey::Voted(proposal_id, voter.clone());
@@ -262,6 +331,15 @@ impl DaoGovernance {
         voters.push_back(voter.clone());
         env.storage().persistent().set(&DataKey::ProposalVoters(proposal_id), &voters);
 
+        // Emit VoteCast event
+        env.events().publish_event(&VoteCast {
+            proposal_id,
+            voter: voter.clone(),
+            support,
+            weight: voting_power,
+        });
+
+        // Emit legacy event for backward compatibility
         env.events().publish(
             (Symbol::new(&env, "vote_cast"), proposal_id, voter.clone()),
             (support, voting_power)
@@ -282,7 +360,9 @@ impl DaoGovernance {
         }
 
         let quorum: i128 = env.storage().instance().get(&DataKey::Quorum).unwrap();
-        if proposal.votes_for <= proposal.votes_against || proposal.votes_for < quorum {
+        let proposal_passed = proposal.votes_for > proposal.votes_against && proposal.votes_for >= quorum;
+        
+        if !proposal_passed {
             panic!("Proposal failed");
         }
 
@@ -290,11 +370,24 @@ impl DaoGovernance {
             panic!("Proposal already queued");
         }
 
+        // Update proposal outcome to track that voting passed
+        proposal.outcome = ProposalOutcome::Succeeded;
+
         let delay: u64 = env.storage().instance().get(&DataKey::TimelockDelay).unwrap();
         proposal.execution_time = env.ledger().timestamp() + delay;
 
         env.storage().persistent().set(&DataKey::Proposal(proposal_id), &proposal);
 
+        // Emit ProposalClosed event when transitioning to Closed state
+        env.events().publish_event(&ProposalClosed {
+            proposal_id,
+            votes_for: proposal.votes_for,
+            votes_against: proposal.votes_against,
+            passed: true,
+            ledger_sequence: current_block,
+        });
+
+        // Emit legacy event for backward compatibility
         env.events().publish(
             (symbol_short!("prop_que"), proposal_id),
             proposal.execution_time
@@ -349,6 +442,15 @@ impl DaoGovernance {
         proposal.executed = true;
         env.storage().persistent().set(&DataKey::Proposal(proposal_id), &proposal);
 
+        let executed_at = env.ledger().timestamp();
+
+        // Emit ProposalExecuted event
+        env.events().publish_event(&ProposalExecuted {
+            proposal_id,
+            executed_at,
+        });
+
+        // Emit legacy event for backward compatibility
         env.events().publish(
             (symbol_short!("prop_exe"), proposal_id),
             true
@@ -367,6 +469,11 @@ impl DaoGovernance {
         if delegator == delegatee {
             panic!("Cannot delegate to self");
         }
+
+        // Get the delegated power amount
+        let token_addr: Address = env.storage().instance().get(&DataKey::GovernanceToken).unwrap();
+        let token_client = token::Client::new(&env, &token_addr);
+        let delegated_power = token_client.balance(&delegator);
 
         // Check for existing delegation
         let old_delegatee: Option<Address> = if env.storage().persistent().has(&DataKey::Delegation(delegator.clone())) {
@@ -403,6 +510,7 @@ impl DaoGovernance {
             delegator: delegator.clone(),
             old_delegatee,
             new_delegatee: delegatee,
+            delegated_power,
         });
     }
 
@@ -416,6 +524,11 @@ impl DaoGovernance {
 
         let former_delegatee = delegation.delegatee.clone();
 
+        // Get the delegated power amount
+        let token_addr: Address = env.storage().instance().get(&DataKey::GovernanceToken).unwrap();
+        let token_client = token::Client::new(&env, &token_addr);
+        let delegated_power = token_client.balance(&delegator);
+
         // Remove delegation record
         env.storage().persistent().remove(&DataKey::Delegation(delegator.clone()));
 
@@ -425,6 +538,7 @@ impl DaoGovernance {
         env.events().publish_event(&DelegationRemoved {
             delegator,
             former_delegatee,
+            delegated_power,
         });
     }
 
@@ -544,32 +658,38 @@ impl DaoGovernance {
             .get(&DataKey::Proposal(proposal_id))
             .expect("Proposal not found");
 
+        // Executed state
         if proposal.executed {
             return ProposalStatus::Executed;
         }
 
         let current_block = env.ledger().sequence();
+        
+        // Proposed state: before voting starts
         if current_block < proposal.start_block {
-            return ProposalStatus::Pending;
+            return ProposalStatus::Proposed;
         }
+        
+        // Open state: voting is ongoing
         if current_block <= proposal.end_block {
-            return ProposalStatus::Active;
+            return ProposalStatus::Open;
         }
 
+        // Determine outcome after voting period ends
         let quorum: i128 = env.storage().instance().get(&DataKey::Quorum).unwrap();
-        if proposal.votes_for <= proposal.votes_against || proposal.votes_for < quorum {
-            return ProposalStatus::Failed;
+        let proposal_passed = proposal.votes_for > proposal.votes_against && proposal.votes_for >= quorum;
+        
+        // Closed state: voting has ended
+        if proposal_passed {
+            if proposal.execution_time > 0 && env.ledger().timestamp() < proposal.execution_time {
+                // Still waiting for timelock
+                return ProposalStatus::Closed;
+            }
+        } else {
+            return ProposalStatus::Expired;
         }
 
-        if proposal.execution_time == 0 {
-            return ProposalStatus::Succeeded;
-        }
-
-        if env.ledger().timestamp() >= proposal.execution_time {
-            return ProposalStatus::Queued; // Or it could be executed
-        }
-
-        ProposalStatus::Queued
+        ProposalStatus::Closed
     }
 
     /// Returns the participation metrics for a voter.
