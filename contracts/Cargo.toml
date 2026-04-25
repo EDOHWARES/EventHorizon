@@ -20,6 +20,7 @@ members = [
     "flash_loan",
     "royalty_registry",
     "treasury_governance",
+    "recursive_action_guard",
 ]
 
 [profile.release]
