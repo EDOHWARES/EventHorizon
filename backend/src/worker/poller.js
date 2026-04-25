@@ -1,9 +1,39 @@
 const { rpc, xdr } = require('@stellar/stellar-sdk');
+const Redis = require('ioredis');
+const Redlock = require('redlock');
 const Trigger = require('../models/trigger.model');
 const batchService = require('../services/batch.service');
 const vaultService = require('../services/vault.service');
 const logger = require('../config/logger');
 const { passesFilters } = require('../utils/filterEvaluator');
+const pollerState = require('./pollerState');
+
+// Redis setup for distributed locks and deduplication
+const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
+const REDIS_PORT = process.env.REDIS_PORT || 6379;
+const REDIS_PASSWORD = process.env.REDIS_PASSWORD || undefined;
+
+const redisClient = new Redis({
+    host: REDIS_HOST,
+    port: REDIS_PORT,
+    password: REDIS_PASSWORD,
+    lazyConnect: true,
+});
+
+const redlock = new Redlock(
+    [redisClient],
+    {
+        driftFactor: 0.01,
+        retryCount:  0, // We handle retries via the interval
+        retryDelay:  200,
+        retryJitter:  200,
+        automaticExtensionThreshold: 500,
+    }
+);
+
+redisClient.on('error', (err) => {
+    logger.warn('Poller Redis error:', { error: err.message });
+});
 
 const RPC_URL = process.env.SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org';
 const server = new rpc.Server(RPC_URL, {
@@ -180,7 +210,7 @@ async function processEvent(trigger, eventPayload) {
 
 // --- Core Polling Logic ---
 
-async function pollEvents() {
+async function executePollCycle() {
     try {
         const triggers = await Trigger.find({ isActive: true });
 
@@ -256,6 +286,18 @@ async function pollEvents() {
                                     });
                                     continue;
                                 }
+
+                                // Idempotency check: Ensure exactly-once processing
+                                const dedupKey = `processed_event:${trigger._id}:${event.id}`;
+                                const isNew = await redisClient.set(dedupKey, '1', 'NX', 'EX', 604800); // 7 days TTL
+                                if (!isNew) {
+                                    logger.debug('Skipping already processed event', {
+                                        triggerId: trigger._id,
+                                        eventId: event.id
+                                    });
+                                    continue;
+                                }
+
                                 foundEvents++;
                                 try {
                                     await processEvent(trigger, event);
@@ -322,6 +364,27 @@ async function pollEvents() {
             stack: error.stack,
             rpcUrl: RPC_URL
         });
+    }
+}
+
+async function pollEvents() {
+    const lockKey = 'locks:poller:leader';
+    const pollInterval = parseInt(process.env.POLL_INTERVAL_MS || '10000', 10);
+    // Add a buffer to the TTL to avoid expiration during minor event loop delays
+    const lockTTL = pollInterval + 5000;
+
+    try {
+        await redlock.using([lockKey], lockTTL, async (signal) => {
+            // We successfully acquired the lock; we are the leader
+            pollerState.setLeader(true);
+            pollerState.setLastPollTime(new Date());
+
+            await executePollCycle();
+        });
+    } catch (err) {
+        // ResourceLockedError or other lock errors mean we are not the leader
+        pollerState.setLeader(false);
+        logger.debug('Skipping poll cycle, another instance is the leader');
     }
 }
 

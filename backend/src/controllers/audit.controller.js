@@ -2,6 +2,7 @@ const AuditLog = require('../models/audit.model');
 const logger = require('../config/logger');
 const AppError = require('../utils/appError');
 const asyncHandler = require('../utils/asyncHandler');
+const retentionService = require('../services/retention.service');
 
 /**
  * Admin-only audit log controller
@@ -303,6 +304,31 @@ exports.bulkVerifyIntegrity = [
                 integrityRate: results.length > 0 ? (validCount / results.length) * 100 : 0,
                 results: invalidCount > 0 ? results.filter(r => !r.integrityValid) : []
             }
+        });
+    })
+];
+
+/**
+ * Search archived audit logs
+ */
+exports.searchArchive = [
+    checkAdminAccess,
+    asyncHandler(async (req, res) => {
+        const { query, startDate, endDate } = req.query;
+
+        logger.info('Admin searching archive', {
+            query,
+            startDate,
+            endDate,
+            ip: req.ip,
+            userAgent: req.get('User-Agent')
+        });
+
+        const results = await retentionService.searchArchive(query, startDate, endDate);
+
+        res.json({
+            success: true,
+            data: results
         });
     })
 ];
