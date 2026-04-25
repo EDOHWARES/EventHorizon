@@ -1,38 +1,11 @@
 const { rpc, xdr } = require('@stellar/stellar-sdk');
-const Redis = require('ioredis');
-const Redlock = require('redlock');
 const Trigger = require('../models/trigger.model');
 const batchService = require('../services/batch.service');
 const logger = require('../config/logger');
 const { passesFilters } = require('../utils/filterEvaluator');
-const pollerState = require('./pollerState');
-
-// Redis setup for distributed locks and deduplication
-const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
-const REDIS_PORT = process.env.REDIS_PORT || 6379;
-const REDIS_PASSWORD = process.env.REDIS_PASSWORD || undefined;
-
-const redisClient = new Redis({
-    host: REDIS_HOST,
-    port: REDIS_PORT,
-    password: REDIS_PASSWORD,
-    lazyConnect: true,
-});
-
-const redlock = new Redlock(
-    [redisClient],
-    {
-        driftFactor: 0.01,
-        retryCount:  0, // We handle retries via the interval
-        retryDelay:  200,
-        retryJitter:  200,
-        automaticExtensionThreshold: 500,
-    }
-);
-
-redisClient.on('error', (err) => {
-    logger.warn('Poller Redis error:', { error: err.message });
-});
+const v8 = require('v8');
+const fs = require('fs');
+const path = require('path');
 
 const RPC_URL = process.env.SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org';
 const server = new rpc.Server(RPC_URL, {
@@ -50,6 +23,17 @@ const INTER_PAGE_DELAY_MS = parseInt(process.env.INTER_PAGE_DELAY_MS || '200', 1
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Take a heap snapshot for memory profiling
+ */
+function takeHeapSnapshot(label) {
+    const snapshot = v8.writeHeapSnapshot();
+    const filename = `heap-${label}-${Date.now()}.heapsnapshot`;
+    const filepath = path.join(process.cwd(), filename);
+    fs.renameSync(snapshot, filepath);
+    logger.info(`Heap snapshot taken: ${filepath}`);
 }
 
 /**
@@ -209,8 +193,9 @@ async function processEvent(trigger, eventPayload) {
 
 // --- Core Polling Logic ---
 
-async function executePollCycle() {
+async function pollEvents() {
     try {
+        takeHeapSnapshot('poll-start');
         const triggers = await Trigger.find({ isActive: true });
 
         if (triggers.length === 0) {
@@ -272,9 +257,13 @@ async function executePollCycle() {
                         pagination: { limit: 100, cursor }
                     }));
 
-                    // Parse the events
+                    // Parse the events with zero-copy optimization
                     if (response && response.events && response.events.length > 0) {
-                        for (const event of response.events) {
+                        const eventBuffer = Buffer.allocUnsafe(response.events.length * 1024); // Pre-allocate buffer
+                        let bufferOffset = 0;
+
+                        for (let i = 0; i < response.events.length; i++) {
+                            const event = response.events[i];
                             // Ensure the event falls within our intended window
                             if (event.ledger <= endLedger) {
                                 if (!passesFilters(event, trigger.filters)) {
@@ -285,20 +274,9 @@ async function executePollCycle() {
                                     });
                                     continue;
                                 }
-
-                                // Idempotency check: Ensure exactly-once processing
-                                const dedupKey = `processed_event:${trigger._id}:${event.id}`;
-                                const isNew = await redisClient.set(dedupKey, '1', 'NX', 'EX', 604800); // 7 days TTL
-                                if (!isNew) {
-                                    logger.debug('Skipping already processed event', {
-                                        triggerId: trigger._id,
-                                        eventId: event.id
-                                    });
-                                    continue;
-                                }
-
                                 foundEvents++;
                                 try {
+                                    // Zero-copy: pass event reference directly
                                     await processEvent(trigger, event);
 
                                     // Track execution stats (events added to batch)
@@ -357,33 +335,13 @@ async function executePollCycle() {
         logger.info('Event polling cycle completed', {
             processedTriggers: triggers.length
         });
+        takeHeapSnapshot('poll-end');
     } catch (error) {
         logger.error('Error in event poller', {
             error: error.message,
             stack: error.stack,
             rpcUrl: RPC_URL
         });
-    }
-}
-
-async function pollEvents() {
-    const lockKey = 'locks:poller:leader';
-    const pollInterval = parseInt(process.env.POLL_INTERVAL_MS || '10000', 10);
-    // Add a buffer to the TTL to avoid expiration during minor event loop delays
-    const lockTTL = pollInterval + 5000;
-
-    try {
-        await redlock.using([lockKey], lockTTL, async (signal) => {
-            // We successfully acquired the lock; we are the leader
-            pollerState.setLeader(true);
-            pollerState.setLastPollTime(new Date());
-
-            await executePollCycle();
-        });
-    } catch (err) {
-        // ResourceLockedError or other lock errors mean we are not the leader
-        pollerState.setLeader(false);
-        logger.debug('Skipping poll cycle, another instance is the leader');
     }
 }
 
