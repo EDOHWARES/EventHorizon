@@ -19,6 +19,7 @@ members = [
     "emitter_registry",
     "flash_loan",
     "royalty_registry",
+    "session_auth",
 ]
 
 [profile.release]
