@@ -16,6 +16,7 @@ members = [
     "yield_vault",
     "prediction_market",
     "emitter_registry",
+    "flash_loan",
 ]
 
 [profile.release]
