@@ -19,6 +19,10 @@ members = [
     "emitter_registry",
     "flash_loan",
     "royalty_registry",
+    "governance_timelock",
+    "amm_pool_v2",
+    "delegator_registry",
+    "access_whitelist",
 ]
 
 [profile.release]
