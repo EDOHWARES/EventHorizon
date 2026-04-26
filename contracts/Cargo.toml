@@ -28,6 +28,15 @@ members = [
     "token_vesting",
     "upgrade_manager",
     "yield_vault",
+    "emitter_registry",
+    "cross_chain_bridge",
+    "flash_loan_registry",
+    "royalty_registry",
+
+    "governance_timelock",
+    "amm_pool_v2",
+    "delegator_registry",
+    "access_whitelist",
 ]
 
 [profile.release]
