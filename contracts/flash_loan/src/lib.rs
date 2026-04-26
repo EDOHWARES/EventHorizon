@@ -7,6 +7,7 @@ enum DataKey {
     Token,
     Owner,
     IsBusy,
+    Registry,
 }
 
 #[contract]
@@ -22,6 +23,13 @@ impl FlashLoanProvider {
         env.storage().instance().set(&DataKey::Token, &token);
         env.storage().instance().set(&DataKey::Owner, &owner);
         env.storage().instance().set(&DataKey::IsBusy, &false);
+    }
+
+    /// Sets the global Flash Loan Registry address.
+    pub fn set_registry(env: Env, registry: Address) {
+        let owner: Address = env.storage().instance().get(&DataKey::Owner).expect("not initialized");
+        owner.require_auth();
+        env.storage().instance().set(&DataKey::Registry, &registry);
     }
 
     /// Provides a flash loan to the receiver.
@@ -60,8 +68,6 @@ impl FlashLoanProvider {
         }
 
         // Calculate profit (Integrated Profit Tracker)
-        // If the receiver returned more than they borrowed (e.g., via a successful arbitrage/liquidation bounty),
-        // we track this and emit a 'Bounty' event.
         let profit = balance_after - balance_before;
         if profit > 0 {
             let owner: Address = env.storage().instance().get(&DataKey::Owner).unwrap();
@@ -69,6 +75,24 @@ impl FlashLoanProvider {
             env.events().publish(
                 (symbol_short!("Bounty"), owner, receiver),
                 profit,
+            );
+        }
+
+        // Record in Registry for global tracking and ROI analysis
+        if let Some(registry_addr) = env.storage().instance().get::<_, Address>(&DataKey::Registry) {
+            // We use current_contract_address() as the provider identifier in the registry.
+            // Note: The registry must be authorized to receive calls from this contract if it uses require_auth.
+            env.invoke_contract::<()>(
+                &registry_addr,
+                &Symbol::new(&env, "record_loan"),
+                vec![
+                    &env,
+                    env.current_contract_address().into_val(&env),
+                    receiver.into_val(&env),
+                    token_addr.into_val(&env),
+                    amount.into_val(&env),
+                    profit.into_val(&env),
+                ],
             );
         }
 
@@ -82,5 +106,9 @@ impl FlashLoanProvider {
 
     pub fn get_owner(env: Env) -> Address {
         env.storage().instance().get(&DataKey::Owner).expect("not initialized")
+    }
+
+    pub fn get_registry(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Registry)
     }
 }
