@@ -14,6 +14,7 @@ EventHorizon is a decentralized "If-This-Then-That" (IFTTT) platform that listen
 -   `/contracts/boilerplate`: Boilerplate Soroban Rust contract for testing.
 -   `/contracts/token_vesting`: Secure token vesting contract with linear release and cliff.
 -   `/contracts/staking`: Reward-based staking contract with early unstake penalties.
+-   `/contracts/reward_pool`: Automated reward pool for high-uptime protocol node operators with penalty logic for missed polling windows.
 
 
 ## 🛠️ Setup & Installation
