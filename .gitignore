@@ -5,6 +5,7 @@
 .env
 node_modules/
 dist/
+backend/logs/
 .DS_Store
 
 # Frontend

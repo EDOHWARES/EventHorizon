@@ -24,7 +24,9 @@
     "mongoose": "^8.0.0",
     "node-vault": "^0.10.2",
     "swagger-jsdoc": "^6.2.8",
-    "swagger-ui-express": "^5.0.1"
+    "swagger-ui-express": "^5.0.1",
+    "winston": "^3.10.0",
+    "winston-daily-rotate-file": "^4.7.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
