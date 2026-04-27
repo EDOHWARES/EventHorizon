@@ -111,10 +111,7 @@ async function executeSingleAction(trigger, eventPayload) {
             return await webhookService.sendSignedWebhook(
                 actionUrl,
                 payload,
-                trigger.webhookSecret,
-                {
-                    customHeaders: trigger.customHeaders
-                }
+                trigger.webhookSecret
             );
         }
 
@@ -214,10 +211,7 @@ async function executeBatchAction(trigger, eventPayloads) {
                     await webhookService.sendSignedWebhook(
                         actionUrl,
                         payload,
-                        trigger.webhookSecret,
-                        {
-                            customHeaders: trigger.customHeaders
-                        }
+                        trigger.webhookSecret
                     );
                     break;
                 }

@@ -1,7 +1,6 @@
 const axios = require('axios');
 const crypto = require('crypto');
 const logger = require('../config/logger');
-const { buildHeaders } = require('../utils/headerBuilder');
 
 /**
  * Webhook service for secure outbound webhook delivery with HMAC signing
@@ -41,12 +40,6 @@ class WebhookService {
             'X-EventHorizon-Timestamp': timestamp,
             ...options.headers
         };
-
-        // Add custom headers if provided
-        if (options.customHeaders && Array.isArray(options.customHeaders)) {
-            const customHeaders = buildHeaders(options.customHeaders, payload.payload || payload);
-            Object.assign(headers, customHeaders);
-        }
 
         logger.info('Sending signed webhook', {
             url,
