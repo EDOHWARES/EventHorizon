@@ -6,6 +6,7 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "test": "node --test",
+    "test:actions:integration": "node --test __tests__/action.integration.test.js",
     "migrate:audit": "node scripts/migrate-audit.js"
   },
   "dependencies": {
@@ -27,6 +28,7 @@
     "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
+    "nock": "^14.0.13",
     "nodemon": "^3.0.1"
   }
 }

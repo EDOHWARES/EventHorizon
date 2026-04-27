@@ -12,7 +12,7 @@ class TelegramService {
      * @param {string} text - The message text to send.
      * @returns {Promise<Object>} The API response data.
      */
-    async sendTelegramMessage(botToken, chatId, text) {
+    async sendTelegramMessage(botToken, chatId, text, options = {}) {
         if (!botToken || !chatId || !text) {
             throw new Error('Telegram Bot Token, Chat ID, and message text are required.');
         }
@@ -20,11 +20,18 @@ class TelegramService {
         const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
 
         try {
-            const response = await axios.post(url, {
-                chat_id: chatId,
-                text: text,
-                parse_mode: 'MarkdownV2'
-            });
+            const response = await axios.post(
+                url,
+                {
+                    chat_id: chatId,
+                    text: text,
+                    parse_mode: 'MarkdownV2'
+                },
+                {
+                    timeout: options.timeout || 30000,
+                    ...options,
+                }
+            );
 
             return response.data;
         } catch (error) {

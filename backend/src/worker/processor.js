@@ -1,7 +1,6 @@
 const { Worker } = require('bullmq');
 const Redis = require('ioredis');
 const axios = require('axios');
-const { sendEventNotification } = require('../services/email.service');
 const { sendDiscordNotification } = require('../services/discord.service');
 const telegramService = require('../services/telegram.service');
 const webhookService = require('../services/webhook.service');
@@ -54,6 +53,7 @@ async function executeSingleAction(trigger, eventPayload) {
 
     switch (actionType) {
         case 'email': {
+            const { sendEventNotification } = require('../services/email.service');
             return await sendEventNotification({
                 trigger,
                 payload: eventPayload,
@@ -148,6 +148,7 @@ async function executeBatchAction(trigger, eventPayloads) {
         try {
             switch (actionType) {
                 case 'email': {
+                    const { sendEventNotification } = require('../services/email.service');
                     await sendEventNotification({
                         trigger,
                         payload: eventPayload,
