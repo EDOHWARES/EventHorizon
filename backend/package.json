@@ -23,6 +23,7 @@
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^8.0.0",
     "node-vault": "^0.10.2",
+    "openapi-to-postmanv2": "^6.0.1",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1"
   },
