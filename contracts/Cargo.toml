@@ -21,6 +21,7 @@ members = [
     "flash_loan",
     "flash_loan_registry",
     "royalty_registry",
+    "external_data_oracle",
 
     "governance_timelock",
     "amm_pool_v2",
