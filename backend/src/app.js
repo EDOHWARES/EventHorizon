@@ -1,17 +1,17 @@
-const express = require('express');
-const cors = require('cors');
+const express = require("express");
+const cors = require("cors");
 const {
-    globalRateLimiter,
-    authRateLimiter,
-} = require('./middleware/rateLimit.middleware');
+  globalRateLimiter,
+  authRateLimiter,
+} = require("./middleware/rateLimit.middleware");
 const {
-    requestLogger,
-    errorLogger,
-} = require('./middleware/logging.middleware');
+  requestLogger,
+  errorLogger,
+} = require("./middleware/logging.middleware");
 const {
-    errorHandler,
-    notFoundHandler,
-} = require('./middleware/error.middleware');
+  errorHandler,
+  notFoundHandler,
+} = require("./middleware/error.middleware");
 
 const app = express();
 
@@ -19,14 +19,16 @@ app.use(cors());
 app.use(express.json());
 app.use(requestLogger);
 app.use(globalRateLimiter);
-app.use('/api/auth', authRateLimiter);
+app.use("/api/auth", authRateLimiter);
 
-app.use('/api/docs', require('./routes/docs.routes'));
-app.use('/api/triggers', require('./routes/trigger.routes'));
-app.use('/api/invitations', require('./routes/invitation.routes'));
+app.use("/api/docs", require("./routes/docs.routes"));
+app.use("/api/triggers", require("./routes/trigger.routes"));
+app.use("/api/invitations", require("./routes/invitation.routes"));
 // app.use('/api/team', require('./routes/team.routes'));
-app.use('/api/queue', require('./routes/queue.routes'));
-app.use('/api/discovery', require('./routes/discovery.routes'));
+app.use("/api/queue", require("./routes/queue.routes"));
+app.use("/api/discovery", require("./routes/discovery.routes"));
+
+app.use("/api/workflows", require("./routes/workflow.routes"));
 /**
  * @openapi
  * /api/health:
@@ -47,7 +49,7 @@ app.use('/api/discovery', require('./routes/discovery.routes'));
  *                   type: string
  *                   example: ok
  */
-app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
+app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
 
 app.use(errorLogger);
 app.use(notFoundHandler);
