@@ -24,7 +24,8 @@
     "mongoose": "^8.0.0",
     "node-vault": "^0.10.2",
     "swagger-jsdoc": "^6.2.8",
-    "swagger-ui-express": "^5.0.1"
+    "swagger-ui-express": "^5.0.1",
+    "xstate": "^5.31.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
