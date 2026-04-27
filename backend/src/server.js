@@ -47,12 +47,20 @@ app.get('/api/health/poller', (req, res) => {
 // Database Connection
 mongoose
     .connect(process.env.MONGO_URI)
-    .then(() => {
+    .then(async () => {
         logger.info('Connected to MongoDB', {
             database: 'MongoDB',
             status: 'connected',
             uri: process.env.MONGO_URI?.replace(/\/\/.*@/, '//***@'),
         });
+
+        // Initialize Vault
+        try {
+            const vaultService = require('./services/vault.service');
+            await vaultService.initialize();
+        } catch (error) {
+            logger.error('Vault initialization failed', { error: error.message });
+        }
 
         let worker = null;
 
@@ -69,6 +77,14 @@ mongoose
 
         const eventPoller = require('./worker/poller');
         eventPoller.start();
+
+        // Start data retention job
+        const retentionService = require('./services/retention.service');
+        setInterval(() => {
+            retentionService.archiveOldLogs().catch(error => {
+                logger.error('Data retention job failed', { error: error.message });
+            });
+        }, 24 * 60 * 60 * 1000); // Run daily
 
         app.listen(PORT, () => {
             logger.info('Server started successfully', {
@@ -100,10 +116,17 @@ mongoose
         });
     })
     .catch((err) => {
-        logger.error('MongoDB connection failed', {
+        logger.error('MongoDB connection failed, starting server without DB', {
             error: err.message,
-            stack: err.stack,
             database: 'MongoDB',
         });
-        process.exit(1);
+
+        // Start server even without DB for testing
+        app.listen(PORT, () => {
+            logger.warn('Server started without database connection', {
+                port: PORT,
+                environment: process.env.NODE_ENV || 'development',
+                healthCheck: `http://localhost:${PORT}/api/health`,
+            });
+        });
     });

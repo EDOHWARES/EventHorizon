@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const auditController = require('../controllers/audit.controller');
+const authMiddleware = require('../middleware/auth.middleware');
+const permissionMiddleware = require('../middleware/permission.middleware');
 
 /**
  * @openapi
@@ -82,7 +84,11 @@ const auditController = require('../controllers/audit.controller');
  *       503:
  *         description: Admin access not configured
  */
-router.get('/logs', auditController.getAuditLogs);
+router.get('/logs',
+    authMiddleware,
+    permissionMiddleware('view_audit_logs'),
+    auditController.getAuditLogs
+);
 
 /**
  * @openapi
@@ -165,7 +171,11 @@ router.get('/logs', auditController.getAuditLogs);
  *       403:
  *         description: Unauthorized admin access
  */
-router.get('/stats', auditController.getAuditStats);
+router.get('/stats',
+    authMiddleware,
+    permissionMiddleware('view_audit_logs'),
+    auditController.getAuditStats
+);
 
 /**
  * @openapi
@@ -221,7 +231,11 @@ router.get('/stats', auditController.getAuditStats);
  *       404:
  *         description: Resource not found
  */
-router.get('/resources/:resourceId/trail', auditController.getResourceAuditTrail);
+router.get('/resources/:resourceId/trail',
+    authMiddleware,
+    permissionMiddleware('view_audit_logs'),
+    auditController.getResourceAuditTrail
+);
 
 /**
  * @openapi
@@ -262,7 +276,11 @@ router.get('/resources/:resourceId/trail', auditController.getResourceAuditTrail
  *       404:
  *         description: Audit log not found
  */
-router.get('/logs/:logId/verify', auditController.verifyLogIntegrity);
+router.get('/logs/:logId/verify',
+    authMiddleware,
+    permissionMiddleware('view_audit_logs'),
+    auditController.verifyLogIntegrity
+);
 
 /**
  * @openapi
@@ -332,6 +350,43 @@ router.get('/logs/:logId/verify', auditController.verifyLogIntegrity);
  *       403:
  *         description: Unauthorized admin access
  */
-router.get('/verify', auditController.bulkVerifyIntegrity);
+router.get('/verify',
+    authMiddleware,
+    permissionMiddleware('view_audit_logs'),
+    auditController.bulkVerifyIntegrity
+);
+
+/**
+ * @openapi
+ * /api/admin/audit/archive/search:
+ *   get:
+ *     summary: Search archived audit logs
+ *     description: Admin-only endpoint to search audit logs in cold storage
+ *     tags: [Admin, Audit]
+ *     security:
+ *       - adminAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: query
+ *         schema:
+ *           type: string
+ *         description: Search query
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Start date for search
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: End date for search
+ *     responses:
+ *       200:
+ *         description: Archive search results
+ */
+router.get('/archive/search', auditController.searchArchive);
 
 module.exports = router;

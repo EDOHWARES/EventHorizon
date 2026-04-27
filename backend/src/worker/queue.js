@@ -1,205 +1,54 @@
 const { Queue } = require('bullmq');
 const Redis = require('ioredis');
-const logger = require('../config/logger');
-
-const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
-const REDIS_PORT = process.env.REDIS_PORT || 6379;
-const REDIS_PASSWORD = process.env.REDIS_PASSWORD || undefined;
+const networks = require('../config/networks');
 
 const connection = new Redis({
-    host: REDIS_HOST,
-    port: REDIS_PORT,
-    password: REDIS_PASSWORD,
-    lazyConnect: true,
-    maxRetriesPerRequest: null,
+    host: process.env.REDIS_HOST || 'localhost',
+    port: process.env.REDIS_PORT || 6379,
+    password: process.env.REDIS_PASSWORD || undefined,
 });
 
-let queueInstance;
+const queues = {};
 
-function getQueue() {
-    if (!queueInstance) {
-        queueInstance = new Queue('action-queue', {
-            connection,
-            defaultJobOptions: {
-                attempts: 3,
-                backoff: {
-                    type: 'exponential',
-                    delay: 2000,
-                },
-                removeOnComplete: {
-                    age: 86400, // Keep completed jobs for 24 hours
-                    count: 1000,
-                },
-                removeOnFail: {
-                    age: 604800, // Keep failed jobs for 7 days
-                },
-            },
-        });
-    }
-
-    return queueInstance;
+// Initialize a queue partition per network
+for (const network of Object.keys(networks)) {
+    queues[network] = new Queue(`actionQueue-${network}`, { connection });
 }
 
-const actionQueue = {
-    add(...args) {
-        return getQueue().add(...args);
-    },
-    getWaitingCount(...args) {
-        return getQueue().getWaitingCount(...args);
-    },
-    getActiveCount(...args) {
-        return getQueue().getActiveCount(...args);
-    },
-    getCompletedCount(...args) {
-        return getQueue().getCompletedCount(...args);
-    },
-    getFailedCount(...args) {
-        return getQueue().getFailedCount(...args);
-    },
-    getDelayedCount(...args) {
-        return getQueue().getDelayedCount(...args);
-    },
-    clean(...args) {
-        return getQueue().clean(...args);
-    },
-    getWaiting(...args) {
-        return getQueue().getWaiting(...args);
-    },
-    getActive(...args) {
-        return getQueue().getActive(...args);
-    },
-    getCompleted(...args) {
-        return getQueue().getCompleted(...args);
-    },
-    getFailed(...args) {
-        return getQueue().getFailed(...args);
-    },
-    getDelayed(...args) {
-        return getQueue().getDelayed(...args);
-    },
-    getJob(...args) {
-        return getQueue().getJob(...args);
-    },
+const getActionQueue = (network = 'testnet') => {
+    if (!queues[network]) {
+        throw new Error(`Queue for network ${network} not found`);
+    }
+    return queues[network];
 };
 
-/**
- * Add an action job to the queue
- * @param {Object} trigger - The trigger configuration
- * @param {Object} eventPayload - The event data
- * @returns {Promise<Job>} The created job
- */
-async function enqueueAction(trigger, eventPayload) {
-    try {
-        const job = await actionQueue.add(
-            `${trigger.actionType}-${trigger.contractId}`,
-            {
-                trigger,
-                eventPayload,
-            },
-            {
-                priority: trigger.priority || 1,
-                jobId: `${trigger._id}-${Date.now()}`,
-            }
-        );
-
-        logger.info('Action enqueued', {
-            jobId: job.id,
-            actionType: trigger.actionType,
-            contractId: trigger.contractId,
-            eventName: trigger.eventName,
-        });
-
-        return job;
-    } catch (error) {
-        logger.error('Failed to enqueue action', {
-            actionType: trigger.actionType,
-            contractId: trigger.contractId,
-            error: error.message,
-        });
-        throw error;
-    }
-}
-
-/**
- * Get queue statistics
- */
-async function getQueueStats() {
-    const [waiting, active, completed, failed, delayed] = await Promise.all([
-        actionQueue.getWaitingCount(),
-        actionQueue.getActiveCount(),
-        actionQueue.getCompletedCount(),
-        actionQueue.getFailedCount(),
-        actionQueue.getDelayedCount(),
-    ]);
-
-    return {
-        waiting,
-        active,
-        completed,
-        failed,
-        delayed,
-        total: waiting + active + completed + failed + delayed,
-    };
-}
-
-/**
- * Clean old jobs from the queue
- */
-async function cleanQueue() {
-    try {
-        await actionQueue.clean(86400000, 1000, 'completed'); // 24 hours
-        await actionQueue.clean(604800000, 1000, 'failed'); // 7 days
-        logger.info('Queue cleaned successfully');
-    } catch (error) {
-        logger.error('Failed to clean queue', { error: error.message });
-    }
-}
-
-/**
- * Add a batch action job to the queue
- * @param {Object} trigger - The trigger configuration
- * @param {Array} eventPayloads - Array of event data
- * @returns {Promise<Job>} The created job
- */
-async function enqueueBatchAction(trigger, eventPayloads) {
-    try {
-        const job = await actionQueue.add(
-            `batch-${trigger.actionType}-${trigger.contractId}`,
-            {
-                trigger,
-                eventPayloads, // Array of events
-                isBatch: true,
-            },
-            {
-                priority: trigger.priority || 1,
-                jobId: `batch-${trigger._id}-${Date.now()}`,
-            }
-        );
-
-        logger.info('Batch action enqueued', {
-            jobId: job.id,
-            actionType: trigger.actionType,
-            contractId: trigger.contractId,
-            eventName: trigger.eventName,
-            batchSize: eventPayloads.length,
-        });
-
-        return job;
-    } catch (error) {
-        logger.error('Failed to enqueue batch action', {
-            actionType: trigger.actionType,
-            contractId: trigger.contractId,
-            batchSize: eventPayloads.length,
-            error: error.message,
-        });
-        throw error;
-    }
-}
-
-module.exports = {
-    actionQueue,
-    enqueueAction,
-    enqueueBatchAction,
-    getQueueStats,
-    cleanQueue,
+const enqueueAction = async (trigger, eventPayload) => {
+    const network = trigger.network || 'testnet';
+    const queue = getActionQueue(network);
+    
+    await queue.add(
+        `${trigger.actionType}-${trigger._id}`, 
+        { trigger, eventPayload },
+        {
+            attempts: trigger.retryConfig?.maxRetries || 3,
+            backoff: { type: 'exponential', delay: trigger.retryConfig?.retryIntervalMs || 2000 }
+        }
+    );
 };
+
+const getQueueStats = async () => {
+    const stats = {};
+    for (const [network, queue] of Object.entries(queues)) {
+        stats[network] = await queue.getJobCounts();
+    }
+    return stats;
+};
+
+const cleanQueue = async () => {
+    for (const queue of Object.values(queues)) {
+        await queue.clean(24 * 3600 * 1000, 1000, 'completed');
+        await queue.clean(7 * 24 * 3600 * 1000, 1000, 'failed');
+    }
+};
+
+module.exports = { getActionQueue, enqueueAction, getQueueStats, cleanQueue, queues };

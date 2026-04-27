@@ -1,3 +1,6 @@
+# IDE
+.qcoder/
+
 # Server
 .env
 node_modules/

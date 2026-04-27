@@ -30,6 +30,17 @@ const filterSchema = new mongoose.Schema({
 }, { _id: false });
 
 const triggerSchema = new mongoose.Schema({
+    organization: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Organization',
+        required: true,
+        index: true,
+    },
+    createdBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        required: true,
+    },
     contractId: {
         type: String,
         required: true,

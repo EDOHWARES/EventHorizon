@@ -8,9 +8,10 @@ class SlackService {
      * Builds a Slack Block Kit payload from a Soroban event.
      * 
      * @param {Object} event - The Soroban event object.
+     * @param {Object} trigger - The matched trigger configuration.
      * @returns {Object} The Block Kit payload object.
      */
-    buildAlertBlocks(event) {
+    buildAlertBlocks(event, trigger) {
         // Determine severity and emoji (defaulting to info)
         // This is a simplified example based on common event structures
         let severity = 'info';
@@ -26,7 +27,7 @@ class SlackService {
 
         const eventName = event.type || event.topic?.[0] || 'Unknown Event';
         const contractId = event.contractId || 'Unknown Contract';
-        const network = process.env.NETWORK_PASSPHRASE || ['Test', 'net'].join(''); // This should help with GG
+        const network = trigger?.network || event?.network || process.env.NETWORK_PASSPHRASE || 'Testnet';
 
         // Create the Block Kit blocks
         const blocks = [
@@ -152,7 +153,7 @@ class SlackService {
         if (trigger.action.message) {
             payload = { text: trigger.action.message };
         } else {
-            payload = this.buildAlertBlocks(event);
+            payload = this.buildAlertBlocks(event, trigger);
         }
 
         return await this.sendSlackAlert(webhookUrl, payload);

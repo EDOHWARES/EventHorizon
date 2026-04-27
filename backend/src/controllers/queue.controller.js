@@ -1,4 +1,4 @@
-const { getQueueStats, cleanQueue, actionQueue } = require('../worker/queue');
+const { getQueueStats, cleanQueue, getActionQueue } = require('../worker/queue');
 const batchService = require('../services/batch.service');
 const logger = require('../config/logger');
 
@@ -26,24 +26,25 @@ async function getStats(req, res) {
  */
 async function getJobs(req, res) {
     try {
-        const { status = 'completed', limit = 50 } = req.query;
+        const { status = 'completed', limit = 50, network = 'testnet' } = req.query;
+        const queue = getActionQueue(network);
         
         let jobs;
         switch (status) {
             case 'waiting':
-                jobs = await actionQueue.getWaiting(0, limit - 1);
+                jobs = await queue.getWaiting(0, limit - 1);
                 break;
             case 'active':
-                jobs = await actionQueue.getActive(0, limit - 1);
+                jobs = await queue.getActive(0, limit - 1);
                 break;
             case 'completed':
-                jobs = await actionQueue.getCompleted(0, limit - 1);
+                jobs = await queue.getCompleted(0, limit - 1);
                 break;
             case 'failed':
-                jobs = await actionQueue.getFailed(0, limit - 1);
+                jobs = await queue.getFailed(0, limit - 1);
                 break;
             case 'delayed':
-                jobs = await actionQueue.getDelayed(0, limit - 1);
+                jobs = await queue.getDelayed(0, limit - 1);
                 break;
             default:
                 return res.status(400).json({
@@ -144,7 +145,10 @@ async function flushBatches(req, res) {
 async function retryJob(req, res) {
     try {
         const { jobId } = req.params;
-        const job = await actionQueue.getJob(jobId);
+        const { network = 'testnet' } = req.query;
+        
+        const queue = getActionQueue(network);
+        const job = await queue.getJob(jobId);
 
         if (!job) {
             return res.status(404).json({

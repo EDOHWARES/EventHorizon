@@ -9,9 +9,15 @@ exports.createTrigger = asyncHandler(async (req, res) => {
         eventName: req.body.eventName,
         userAgent: req.get('User-Agent'),
         ip: req.ip,
+        userId: req.user.id,
+        organizationId: req.user.organization._id,
     });
 
-    const trigger = new Trigger(req.body);
+    const trigger = new Trigger({
+        ...req.body,
+        organization: req.user.organization._id,
+        createdBy: req.user.id,
+    });
     await trigger.save();
 
     logger.info('Trigger created successfully', {
@@ -28,9 +34,13 @@ exports.createTrigger = asyncHandler(async (req, res) => {
 });
 
 exports.getTriggers = asyncHandler(async (req, res) => {
-    logger.debug('Fetching all triggers', { ip: req.ip });
+    logger.debug('Fetching triggers for organization', {
+        ip: req.ip,
+        userId: req.user.id,
+        organizationId: req.user.organization._id,
+    });
 
-    const triggers = await Trigger.find();
+    const triggers = await Trigger.find({ organization: req.user.organization._id });
 
     logger.info('Triggers fetched successfully', {
         count: triggers.length,
@@ -47,9 +57,14 @@ exports.deleteTrigger = asyncHandler(async (req, res) => {
     logger.info('Deleting trigger', {
         triggerId: req.params.id,
         ip: req.ip,
+        userId: req.user.id,
+        organizationId: req.user.organization._id,
     });
 
-    const trigger = await Trigger.findByIdAndDelete(req.params.id);
+    const trigger = await Trigger.findOneAndDelete({
+        _id: req.params.id,
+        organization: req.user.organization._id,
+    });
 
     if (!trigger) {
         logger.warn('Trigger not found for deletion', {
@@ -74,10 +89,12 @@ exports.updateTrigger = asyncHandler(async (req, res) => {
     logger.info('Updating trigger', {
         triggerId: req.params.id,
         ip: req.ip,
+        userId: req.user.id,
+        organizationId: req.user.organization._id,
     });
 
-    const trigger = await Trigger.findByIdAndUpdate(
-        req.params.id,
+    const trigger = await Trigger.findOneAndUpdate(
+        { _id: req.params.id, organization: req.user.organization._id },
         req.body,
         { new: true, runValidators: true }
     );

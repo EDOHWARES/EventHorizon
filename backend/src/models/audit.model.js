@@ -5,6 +5,14 @@ const mongoose = require('mongoose');
  * Designed to be immutable with restricted access
  */
 const auditLogSchema = new mongoose.Schema({
+    // Organization context
+    organization: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Organization',
+        required: true,
+        index: true,
+    },
+
     // What happened
     operation: {
         type: String,
@@ -28,10 +36,9 @@ const auditLogSchema = new mongoose.Schema({
 
     // Who performed the action
     userId: {
-        type: String,
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
         index: true,
-        // For now, we'll use IP + User-Agent as identifier
-        // Can be extended with proper authentication later
     },
     userAgent: {
         type: String,
@@ -129,6 +136,7 @@ auditLogSchema.statics.createLog = async function(options) {
         operation,
         resourceType = 'Trigger',
         resourceId,
+        organization,
         userId,
         userAgent,
         ipAddress,
@@ -141,6 +149,7 @@ auditLogSchema.statics.createLog = async function(options) {
         operation,
         resourceType,
         resourceId,
+        organization,
         userId,
         userAgent,
         ipAddress,
@@ -155,9 +164,10 @@ auditLogSchema.statics.createLog = async function(options) {
 
 // Static method to get audit trail for a resource
 auditLogSchema.statics.getAuditTrail = function(resourceId, options = {}) {
-    const { limit = 50, skip = 0, operations } = options;
+    const { limit = 50, skip = 0, operations, organization } = options;
 
     let query = { resourceId };
+    if (organization) query.organization = organization;
     if (operations && operations.length > 0) {
         query.operation = { $in: operations };
     }

@@ -1,6 +1,43 @@
 const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/auth.controller');
+const {
+    validateBody,
+    validationSchemas,
+} = require('../middleware/validation.middleware');
+
+/**
+ * @openapi
+ * /api/auth/register:
+ *   post:
+ *     summary: Register new user and organization
+ *     tags:
+ *       - Auth
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               email:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *               firstName:
+ *                 type: string
+ *               lastName:
+ *                 type: string
+ *               organizationName:
+ *                 type: string
+ *     responses:
+ *       201:
+ *         description: Registration successful
+ */
+router.post('/register',
+    validateBody(validationSchemas.register),
+    authController.register
+);
 
 /**
  * @openapi
@@ -23,7 +60,10 @@ const authController = require('../controllers/auth.controller');
  *             schema:
  *               $ref: '#/components/schemas/AuthTokenResponse'
  */
-router.post('/login', authController.login);
+router.post('/login',
+    validateBody(validationSchemas.authCredentials),
+    authController.login
+);
 
 /**
  * @openapi
