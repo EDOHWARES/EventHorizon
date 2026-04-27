@@ -35,6 +35,18 @@ const validationSchemas = {
         isActive: Joi.boolean().default(true),
         lastPolledLedger: Joi.number().integer().min(0).default(0),
         filters: filtersSchema.default([]),
+        authConfig: Joi.object({
+            type: Joi.string().valid('none', 'oauth2').default('none'),
+            oauth2: Joi.object({
+                tokenUrl: Joi.string().uri().required(),
+                clientId: Joi.string().required(),
+                clientSecret: Joi.string().required(),
+            }).when('type', {
+                is: 'oauth2',
+                then: Joi.required(),
+                otherwise: Joi.forbidden()
+            })
+        }).optional(),
     }),
     authCredentials: Joi.object({
         email: Joi.string().trim().email().required(),
