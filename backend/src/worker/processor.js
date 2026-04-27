@@ -1,8 +1,19 @@
 const { Worker } = require('bullmq');
 const Redis = require('ioredis');
 const axios = require('axios');
-const { sendEventNotification } = require('../services/email.service');
-const { sendDiscordNotification } = require('../services/discord.service');
+let sendEventNotification;
+try {
+    sendEventNotification = require('../services/email.service').sendEventNotification;
+} catch (e) {
+    sendEventNotification = async () => { console.warn('Email service not available'); };
+}
+
+let sendDiscordNotification;
+try {
+    sendDiscordNotification = require('../services/discord.service').sendDiscordNotification;
+} catch (e) {
+    sendDiscordNotification = async () => { console.warn('Discord service not available'); };
+}
 const telegramService = require('../services/telegram.service');
 const webhookService = require('../services/webhook.service');
 const logger = require('../config/logger');
@@ -12,13 +23,16 @@ const REDIS_PORT = process.env.REDIS_PORT || 6379;
 const REDIS_PASSWORD = process.env.REDIS_PASSWORD || undefined;
 const WORKER_CONCURRENCY = Number(process.env.WORKER_CONCURRENCY || 5);
 
-const connection = new Redis({
+const connectionConfig = {
     host: REDIS_HOST,
     port: REDIS_PORT,
     password: REDIS_PASSWORD,
     lazyConnect: true,
     maxRetriesPerRequest: null,
-});
+};
+
+// Default connection for general queue usage if needed
+const connection = new Redis(connectionConfig);
 
 /**
  * Execute the action based on the trigger type
@@ -290,7 +304,7 @@ function createWorker() {
             }
         },
         {
-            connection,
+            connection: new Redis(connectionConfig),
             concurrency: WORKER_CONCURRENCY,
             limiter: {
                 max: 10,

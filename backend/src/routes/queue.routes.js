@@ -38,6 +38,20 @@ router.get('/stats', checkQueueAvailable, queueController?.getStats || ((req, re
 
 /**
  * @swagger
+ * /api/queue/metrics:
+ *   get:
+ *     summary: Get queue scaling metrics
+ *     tags: [Queue]
+ *     responses:
+ *       200:
+ *         description: Queue scaling metrics retrieved successfully
+ *       503:
+ *         description: Queue system not available (Redis not configured)
+ */
+router.get('/metrics', checkQueueAvailable, queueController?.getMetrics || ((req, res) => res.status(503).json({ error: 'Queue service unavailable' })));
+
+/**
+ * @swagger
  * /api/queue/jobs:
  *   get:
  *     summary: Get jobs by status
