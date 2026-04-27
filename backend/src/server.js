@@ -1,7 +1,24 @@
-const mongoose = require('mongoose');
 require('dotenv').config();
+
+// Tracing must be initialized before any instrumented library is required
+// (express, mongoose, ioredis, http) so auto-instrumentation can patch them.
+const tracing = require('./config/tracing');
+tracing.start();
+
+const mongoose = require('mongoose');
 const logger = require('./config/logger');
 const app = require('./app');
+
+if (tracing.getInitError()) {
+    logger.warn('OpenTelemetry initialization failed - tracing disabled', {
+        error: tracing.getInitError().message,
+    });
+} else if (tracing.isInitialized()) {
+    logger.info('OpenTelemetry tracing enabled', {
+        service: tracing.getServiceName(),
+        exporter: process.env.OTEL_EXPORTER || 'otlp',
+    });
+}
 
 const PORT = process.env.PORT || 5000;
 
@@ -112,6 +129,13 @@ mongoose
             }
 
             await mongoose.connection.close();
+
+            try {
+                await tracing.shutdown();
+            } catch (error) {
+                logger.error('OpenTelemetry shutdown failed', { error: error.message });
+            }
+
             process.exit(0);
         });
     })

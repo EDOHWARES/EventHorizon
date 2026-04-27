@@ -12,11 +12,13 @@ const {
     errorHandler,
     notFoundHandler,
 } = require('./middleware/error.middleware');
+const { tracingMiddleware } = require('./middleware/tracing.middleware');
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use(tracingMiddleware);
 app.use(requestLogger);
 app.use(globalRateLimiter);
 app.use('/api/auth', authRateLimiter);

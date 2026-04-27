@@ -6,6 +6,7 @@ const { sendDiscordNotification } = require('../services/discord.service');
 const telegramService = require('../services/telegram.service');
 const webhookService = require('../services/webhook.service');
 const logger = require('../config/logger');
+const { withSpan, runWithExtractedContext } = require('../utils/tracing');
 
 const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
 const REDIS_PORT = process.env.REDIS_PORT || 6379;
@@ -267,27 +268,41 @@ function createWorker() {
     const worker = new Worker(
         'action-queue',
         async (job) => {
-            try {
-                const result = await executeAction(job);
-                
-                logger.info('Action job completed successfully', {
-                    jobId: job.id,
-                    actionType: job.data.trigger.actionType,
-                    result: result,
-                });
+            const traceCarrier = job?.data?._traceContext;
+            return runWithExtractedContext(traceCarrier, () => withSpan(
+                'worker.action.execute',
+                async () => {
+                    try {
+                        const result = await executeAction(job);
 
-                return result;
-            } catch (error) {
-                logger.error('Action job failed', {
-                    jobId: job.id,
-                    actionType: job.data.trigger.actionType,
-                    error: error.message,
-                    stack: error.stack,
-                    attempt: job.attemptsMade + 1,
-                });
+                        logger.info('Action job completed successfully', {
+                            jobId: job.id,
+                            actionType: job.data.trigger.actionType,
+                            result: result,
+                        });
 
-                throw error;
-            }
+                        return result;
+                    } catch (error) {
+                        logger.error('Action job failed', {
+                            jobId: job.id,
+                            actionType: job.data.trigger.actionType,
+                            error: error.message,
+                            stack: error.stack,
+                            attempt: job.attemptsMade + 1,
+                        });
+
+                        throw error;
+                    }
+                },
+                {
+                    'job.id': String(job.id),
+                    'job.attempt': job.attemptsMade + 1,
+                    'action.type': job?.data?.trigger?.actionType,
+                    'action.contract_id': job?.data?.trigger?.contractId,
+                    'action.event_name': job?.data?.trigger?.eventName,
+                    'action.is_batch': Boolean(job?.data?.isBatch),
+                },
+            ));
         },
         {
             connection,

@@ -4,6 +4,7 @@ const batchService = require('../services/batch.service');
 const correlationService = require('../services/correlation.service');
 const logger = require('../config/logger');
 const { passesFilters } = require('../utils/filterEvaluator');
+const { withSpan, setAttributes } = require('../utils/tracing');
 
 const RPC_URL = process.env.SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org';
 const server = new rpc.Server(RPC_URL, {
@@ -181,8 +182,15 @@ async function processEvent(trigger, eventPayload) {
 // --- Core Polling Logic ---
 
 async function pollEvents() {
+    return withSpan('stellar.poll.cycle', async () => pollEventsImpl(), {
+        'rpc.url': RPC_URL,
+    });
+}
+
+async function pollEventsImpl() {
     try {
         const triggers = await Trigger.find({ isActive: true });
+        setAttributes({ 'poll.active_triggers': triggers.length });
 
         if (triggers.length === 0) {
             logger.debug('No active triggers found for polling');
@@ -217,13 +225,14 @@ async function pollEvents() {
             const contractTriggers = triggersByContract[contractId];
             logger.debug(`Polling for contract: ${contractId}, triggers: ${contractTriggers.length}`);
 
+            await withSpan('stellar.poll.contract', async () => {
             try {
                 // Determine ledger bounds based on the furthest behind trigger
                 let startLedger = Math.max(...contractTriggers.map(t => t.lastPolledLedger || 0));
                 if (startLedger === 0) {
                     startLedger = Math.max(1, latestLedgerSequence - 100);
                 } else {
-                    if (startLedger >= latestLedgerSequence) continue;
+                    if (startLedger >= latestLedgerSequence) return;
                     startLedger += 1;
                 }
 
@@ -310,6 +319,7 @@ async function pollEvents() {
             } catch (contractError) {
                 logger.error(`Error processing contract ${contractId}:`, { error: contractError.message });
             }
+            }, { 'stellar.contract_id': contractId, 'stellar.trigger_count': contractTriggers.length });
 
             await sleep(INTER_TRIGGER_DELAY_MS);
         }
