@@ -58,6 +58,12 @@ const triggerSchema = new mongoose.Schema({
         type: String,
         required: true
     },
+    webhookSecret: {
+        type: String,
+        // Required for webhook actions, but we'll make it optional in schema and validate elsewhere
+        // because other action types don't use it.
+        select: false, // Do not include in query results by default
+    },
     isActive: {
         type: Boolean,
         default: true
@@ -119,6 +125,39 @@ const triggerSchema = new mongoose.Schema({
     filters: {
         type: [filterSchema],
         default: [],
+    },
+    // Custom headers for webhook actions
+    customHeaders: {
+        type: [{
+            key: {
+                type: String,
+                trim: true,
+                required: true
+            },
+            value: {
+                type: String,
+                required: true
+            }
+        }],
+        default: [],
+        validate: {
+            validator: function(arr) {
+                // Validate each header
+                for (const header of arr) {
+                    // Prevent unsafe headers
+                    const unsafeHeaders = ['host', 'content-length', 'content-type', 'user-agent', 'authorization'];
+                    if (unsafeHeaders.includes(header.key.toLowerCase())) {
+                        return false;
+                    }
+                    // Validate key format (alphanumeric, hyphen, underscore)
+                    if (!/^[_a-zA-Z0-9-]+$/.test(header.key)) {
+                        return false;
+                    }
+                }
+                return true;
+            },
+            message: 'Invalid custom header configuration'
+        }
     }
 }, {
     timestamps: true,
