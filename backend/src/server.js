@@ -86,6 +86,14 @@ mongoose
             });
         }, 24 * 60 * 60 * 1000); // Run daily
 
+        // Secret rotation scheduler — check every hour
+        const { processDueRotations } = require('./services/rotation.service');
+        setInterval(() => {
+            processDueRotations().catch(error => {
+                logger.error('Secret rotation scheduler failed', { error: error.message });
+            });
+        }, 60 * 60 * 1000);
+
         app.listen(PORT, () => {
             logger.info('Server started successfully', {
                 port: PORT,
