@@ -1,11 +1,13 @@
 const { Worker } = require('bullmq');
 const Redis = require('ioredis');
 const axios = require('axios');
+const { performance } = require('perf_hooks');
 const { sendEventNotification } = require('../services/email.service');
 const { sendDiscordNotification } = require('../services/discord.service');
 const telegramService = require('../services/telegram.service');
 const logger = require('../config/logger');
 const pubsub = require('../graphql/pubsub');
+const { transformPayload } = require('./wasmTransformer');
 
 const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
 const REDIS_PORT = process.env.REDIS_PORT || 6379;
@@ -24,7 +26,7 @@ const connection = new Redis({
  * Execute the action based on the trigger type
  */
 async function executeAction(job) {
-    const { trigger, eventPayload, eventPayloads, isBatch } = job.data;
+    let { trigger, eventPayload, eventPayloads, isBatch } = job.data;
     const { actionType, actionUrl, contractId, eventName } = trigger;
 
     const batchSize = isBatch ? eventPayloads.length : 1;
@@ -38,6 +40,32 @@ async function executeAction(job) {
         batchSize,
         attempt: job.attemptsMade + 1,
     });
+
+    // Apply Custom WebAssembly Payload Transformation if configured
+    if (trigger.transformerConfig && trigger.transformerConfig.wasmBase64) {
+        const start = performance.now();
+        try {
+            if (isBatch) {
+                for (let i = 0; i < eventPayloads.length; i++) {
+                    eventPayloads[i] = await transformPayload(trigger.transformerConfig.wasmBase64, eventPayloads[i], trigger.transformerConfig.timeoutMs);
+                }
+            } else {
+                eventPayload = await transformPayload(trigger.transformerConfig.wasmBase64, eventPayload, trigger.transformerConfig.timeoutMs);
+            }
+            const duration = performance.now() - start;
+            logger.info('WASM payload transformation successful', {
+                jobId: job.id,
+                durationMs: duration.toFixed(2),
+                isBatch,
+                batchSize
+            });
+        } catch (error) {
+            logger.error('WASM payload transformation failed', { jobId: job.id, error: error.message });
+            if (!trigger.transformerConfig.continueOnError) {
+                throw new Error(`WASM Transformation failed: ${error.message}`);
+            }
+        }
+    }
 
     if (isBatch) {
         return await executeBatchAction(trigger, eventPayloads);
