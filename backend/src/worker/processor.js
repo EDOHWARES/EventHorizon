@@ -4,8 +4,8 @@ const axios = require('axios');
 const { sendEventNotification } = require('../services/email.service');
 const { sendDiscordNotification } = require('../services/discord.service');
 const telegramService = require('../services/telegram.service');
-const webhookService = require('../services/webhook.service');
 const logger = require('../config/logger');
+const pubsub = require('../graphql/pubsub');
 
 const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
 const REDIS_PORT = process.env.REDIS_PORT || 6379;
@@ -102,17 +102,11 @@ async function executeSingleAction(trigger, eventPayload) {
                 throw new Error('Missing actionUrl for webhook trigger');
             }
 
-            const payload = {
+            return await axios.post(actionUrl, {
                 contractId,
                 eventName,
                 payload: eventPayload,
-            };
-
-            return await webhookService.sendSignedWebhook(
-                actionUrl,
-                payload,
-                trigger.webhookSecret
-            );
+            });
         }
 
         default:
@@ -199,20 +193,14 @@ async function executeBatchAction(trigger, eventPayloads) {
                         throw new Error('Missing actionUrl for webhook trigger');
                     }
 
-                    const payload = {
+                    await axios.post(actionUrl, {
                         contractId,
                         eventName,
                         payload: eventPayload,
                         batchIndex: i,
                         batchSize: eventPayloads.length,
                         batchPayloads: eventPayloads, // Send the full batch for webhooks
-                    };
-
-                    await webhookService.sendSignedWebhook(
-                        actionUrl,
-                        payload,
-                        trigger.webhookSecret
-                    );
+                    });
                     break;
                 }
 
@@ -313,6 +301,19 @@ function createWorker() {
             error: err.message,
             attemptsRemaining: job ? job.opts.attempts - job.attemptsMade : 0,
         });
+            
+            if (job) {
+                pubsub.publish('EXECUTION_LOG', {
+                    executionLog: {
+                        jobId: job.id,
+                        triggerId: String(job.data.trigger._id),
+                        actionType: job.data.trigger.actionType,
+                        status: 'FAILED',
+                        error: err.message,
+                        timestamp: new Date().toISOString()
+                    }
+                });
+            }
     });
 
     worker.on('error', (err) => {
