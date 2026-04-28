@@ -2,6 +2,7 @@ const { rpc, xdr } = require('@stellar/stellar-sdk');
 const Trigger = require('../models/trigger.model');
 const batchService = require('../services/batch.service');
 const correlationService = require('../services/correlation.service');
+const deduplication = require('../services/deduplication.service');
 const logger = require('../config/logger');
 const { passesFilters } = require('../utils/filterEvaluator');
 
@@ -255,6 +256,7 @@ async function pollEvents() {
                                     if (trigger.sequence) {
                                         const result = await correlationService.checkSequence(trigger, event);
                                         if (result.shouldFire) {
+                                            if (await deduplication.isDuplicate(trigger._id, event)) continue;
                                             await processEvent(trigger, result.eventPayload);
                                             trigger.totalExecutions = (trigger.totalExecutions || 0) + 1;
                                             trigger.lastSuccessAt = new Date();
@@ -262,6 +264,7 @@ async function pollEvents() {
                                         }
                                     } else {
                                         if (event.eventName === trigger.eventName && passesFilters(event, trigger.filters)) {
+                                            if (await deduplication.isDuplicate(trigger._id, event)) continue;
                                             await processEvent(trigger, event);
                                             trigger.totalExecutions = (trigger.totalExecutions || 0) + 1;
                                             trigger.lastSuccessAt = new Date();
