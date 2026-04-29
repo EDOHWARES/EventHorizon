@@ -3,6 +3,9 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/user.model');
 const Organization = require('../models/organization.model');
 const Role = require('../models/role.model');
+const auth0Service = require('../services/auth0.service');
+const provisioningService = require('../services/provisioning.service');
+const logger = require('../config/logger');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret';
 const JWT_REFRESH_SECRET =
@@ -10,6 +13,75 @@ const JWT_REFRESH_SECRET =
 
 const ACCESS_EXPIRES = '1h';
 const REFRESH_EXPIRES = '7d';
+
+/**
+ * SSO CALLBACK (Auth0)
+ */
+exports.ssoCallback = async (req, res) => {
+  try {
+    const { idToken } = req.body;
+
+    if (!idToken) {
+      return res.status(400).json({ error: 'Missing ID Token' });
+    }
+
+    // 1. Verify Auth0 Token
+    const auth0User = await auth0Service.verifyToken(idToken);
+    
+    // 2. Map Roles from Token
+    const mappedRoleName = auth0Service.mapRoles(auth0User['https://eventhorizon.app/roles']);
+
+    // 3. Find or Create User (JIT Provisioning via Service)
+    const user = await provisioningService.provisionUser(auth0User, mappedRoleName);
+
+    if (!user.isActive) {
+      return res.status(401).json({ error: 'User is inactive' });
+    }
+
+    // 4. Generate EventHorizon JWTs
+    const ehAccessToken = jwt.sign(
+      {
+        id: user._id,
+        email: user.email,
+        organization: user.organization._id,
+        role: user.role._id,
+        permissions: user.role.permissions
+      },
+      JWT_SECRET,
+      { expiresIn: ACCESS_EXPIRES }
+    );
+
+    const ehRefreshToken = jwt.sign(
+      { id: user._id },
+      JWT_REFRESH_SECRET,
+      { expiresIn: REFRESH_EXPIRES }
+    );
+
+    res.json({
+      token: ehAccessToken,
+      refreshToken: ehRefreshToken,
+      expiresIn: 3600,
+      user: {
+        id: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        organization: {
+          id: user.organization._id,
+          name: user.organization.name,
+        },
+        role: {
+          id: user.role._id,
+          name: user.role.name,
+          permissions: user.role.permissions,
+        },
+      },
+    });
+  } catch (error) {
+    logger.error('SSO Authentication failed', { error: error.message });
+    res.status(401).json({ error: 'SSO Authentication failed' });
+  }
+};
 
 /**
  * REGISTER

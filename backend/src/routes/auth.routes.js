@@ -75,4 +75,26 @@ router.post('/login',
  */
 router.post('/refresh', authController.refreshToken);
 
+/**
+ * @openapi
+ * /api/auth/sso/callback:
+ *   post:
+ *     summary: Auth0 SSO callback
+ *     tags:
+ *       - Auth
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               idToken:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: SSO Login successful
+ */
+router.post('/sso/callback', authController.ssoCallback);
+
 module.exports = router;

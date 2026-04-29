@@ -22,6 +22,7 @@
     "joi": "^18.1.1",
     "jsonpath-plus": "^10.4.0",
     "jsonwebtoken": "^9.0.3",
+    "jwks-rsa": "^4.0.1",
     "mongoose": "^8.0.0",
     "node-vault": "^0.10.2",
     "swagger-jsdoc": "^6.2.8",

@@ -11,7 +11,13 @@ const userSchema = new mongoose.Schema(
     },
     password: {
       type: String,
-      required: true,
+      required: function() { return !this.auth0Id; }, // Required only for local users
+    },
+    auth0Id: {
+      type: String,
+      unique: true,
+      sparse: true, // Allow multiple nulls if not using Auth0
+      index: true,
     },
     firstName: {
       type: String,
