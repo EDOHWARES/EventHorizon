@@ -6,7 +6,8 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "test": "node --test",
-    "migrate:audit": "node scripts/migrate-audit.js"
+    "migrate:audit": "node scripts/migrate-audit.js",
+    "start:mtls": "node src/mtls-server.js"
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^12.0.0",
