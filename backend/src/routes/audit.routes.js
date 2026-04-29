@@ -387,6 +387,7 @@ router.get('/verify',
  *       200:
  *         description: Archive search results
  */
-router.get('/archive/search', auditController.searchArchive);
+// FIX: 'auditController.searchArchive' has not been implemented yet
+//router.get('/archive/search', auditController.searchArchive);
 
 module.exports = router;

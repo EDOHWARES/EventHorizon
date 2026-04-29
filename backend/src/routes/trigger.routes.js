@@ -176,7 +176,8 @@ router.put('/:id',
  *               items:
  *                 $ref: '#/components/schemas/TriggerVersion'
  */
-router.get('/:id/versions', triggerController.getTriggerVersions);
+// FIX: 'triggerController.getTriggerVersions' has not been implemented yet
+//router.get('/:id/versions', triggerController.getTriggerVersions);
 
 /**
  * @openapi
@@ -207,6 +208,7 @@ router.get('/:id/versions', triggerController.getTriggerVersions);
  *             schema:
  *               $ref: '#/components/schemas/Trigger'
  */
-router.post('/:id/versions/:version/restore', triggerController.restoreTriggerVersion);
+// FIX: 'triggerController.restoreTriggerVersion' has not been implemented yet
+//router.post('/:id/versions/:version/restore', triggerController.restoreTriggerVersion);
 
 module.exports = router;

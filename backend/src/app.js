@@ -12,6 +12,8 @@ const {
     errorHandler,
     notFoundHandler,
 } = require('./middleware/error.middleware');
+const authMiddleware = require('./middleware/auth.middleware');
+const yoga = require('./graphql/server');
 
 const app = express();
 
@@ -27,6 +29,7 @@ app.use('/api/invitations', require('./routes/invitation.routes'));
 // app.use('/api/team', require('./routes/team.routes'));
 app.use('/api/queue', require('./routes/queue.routes'));
 app.use('/api/discovery', require('./routes/discovery.routes'));
+app.use(yoga.graphqlEndpoint, authMiddleware, yoga);
 /**
  * @openapi
  * /api/health:
