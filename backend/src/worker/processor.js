@@ -5,6 +5,8 @@ const { sendEventNotification } = require('../services/email.service');
 const { sendDiscordNotification } = require('../services/discord.service');
 const telegramService = require('../services/telegram.service');
 const webhookService = require('../services/webhook.service');
+const emailService = require('../services/email.service');
+const Trigger = require('../models/trigger.model');
 const logger = require('../config/logger');
 
 const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
@@ -39,11 +41,27 @@ async function executeAction(job) {
         attempt: job.attemptsMade + 1,
     });
 
+    let result;
     if (isBatch) {
-        return await executeBatchAction(trigger, eventPayloads);
+        result = await executeBatchAction(trigger, eventPayloads);
     } else {
-        return await executeSingleAction(trigger, eventPayload);
+        result = await executeSingleAction(trigger, eventPayload);
     }
+
+    // Update trigger stats on success
+    try {
+        const triggerDoc = await Trigger.findById(trigger._id);
+        if (triggerDoc) {
+            await triggerDoc.handleSuccess();
+        }
+    } catch (error) {
+        logger.error('Failed to update trigger stats on success', {
+            triggerId: trigger._id,
+            error: error.message
+        });
+    }
+
+    return result;
 }
 
 /**
@@ -280,6 +298,32 @@ function createWorker() {
 
                 return result;
             } catch (error) {
+                // Update trigger stats on failure
+                try {
+                    const triggerDoc = await Trigger.findById(job.data.trigger._id).populate('createdBy');
+                    if (triggerDoc) {
+                        const { autoDisabled, consecutiveFailures } = await triggerDoc.handleFailure(error);
+                        
+                        if (autoDisabled) {
+                            logger.warn(`Trigger auto-disabled due to persistent failures`, {
+                                triggerId: triggerDoc._id,
+                                consecutiveFailures
+                            });
+
+                            // Notify owner
+                            await emailService.sendFailureNotification(
+                                triggerDoc, 
+                                `Action execution failed: ${error.message}. Trigger has been automatically disabled after ${consecutiveFailures} consecutive failures.`
+                            );
+                        }
+                    }
+                } catch (dbError) {
+                    logger.error('Failed to update trigger stats on failure', {
+                        triggerId: job.data.trigger._id,
+                        error: dbError.message
+                    });
+                }
+
                 logger.error('Action job failed', {
                     jobId: job.id,
                     actionType: job.data.trigger.actionType,
