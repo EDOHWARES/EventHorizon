@@ -79,6 +79,10 @@ mongoose
         const eventPoller = require('./worker/poller');
         eventPoller.start();
 
+        // Start health monitor
+        const healthMonitorService = require('./services/healthMonitor.service');
+        healthMonitorService.start();
+
         // Start data retention job
         const retentionService = require('./services/retention.service');
         setInterval(() => {
@@ -98,6 +102,10 @@ mongoose
 
         process.on('SIGTERM', async () => {
             logger.info('SIGTERM received, shutting down gracefully');
+
+            // Stop health monitor
+            const healthMonitorService = require('./services/healthMonitor.service');
+            healthMonitorService.stop();
 
             // Flush any pending batches before shutdown
             try {
