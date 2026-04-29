@@ -5,6 +5,7 @@ const { sendEventNotification } = require('../services/email.service');
 const { sendDiscordNotification } = require('../services/discord.service');
 const telegramService = require('../services/telegram.service');
 const webhookService = require('../services/webhook.service');
+const killSwitchService = require('../services/killSwitch.service');
 const logger = require('../config/logger');
 
 const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
@@ -38,6 +39,17 @@ async function executeAction(job) {
         batchSize,
         attempt: job.attemptsMade + 1,
     });
+
+    // Check kill switch
+    const isAllowed = await killSwitchService.isActionAllowed(trigger.organization.toString(), actionType);
+    if (!isAllowed) {
+        logger.warn('Action blocked by kill switch', {
+            jobId: job.id,
+            organizationId: trigger.organization.toString(),
+            actionType,
+        });
+        throw new Error('Action execution blocked by kill switch');
+    }
 
     if (isBatch) {
         return await executeBatchAction(trigger, eventPayloads);
