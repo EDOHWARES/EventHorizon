@@ -63,6 +63,17 @@ mongoose
             logger.error('Vault initialization failed', { error: error.message });
         }
 
+        // Initialize TimescaleDB (optional — skipped when TIMESCALE_URL is not set)
+        try {
+            const timescale = require('./config/timescale');
+            await timescale.connect();
+        } catch (error) {
+            logger.warn('TimescaleDB initialization skipped — execution log persistence disabled', {
+                error: error.message,
+                hint: 'Set TIMESCALE_URL and run scripts/setup-timescale.js to enable',
+            });
+        }
+
         let worker = null;
 
         try {
@@ -113,6 +124,13 @@ mongoose
             }
 
             await mongoose.connection.close();
+
+            // Close TimescaleDB pool if it was initialised
+            try {
+                const timescale = require('./config/timescale');
+                await timescale.disconnect();
+            } catch (_) {}
+
             process.exit(0);
         });
     })

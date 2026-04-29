@@ -5,6 +5,14 @@ const correlationService = require('../services/correlation.service');
 const logger = require('../config/logger');
 const { passesFilters } = require('../utils/filterEvaluator');
 
+// Execution log persistence — optional; silently disabled when TimescaleDB is not configured
+let executionLogService = null;
+try {
+    executionLogService = require('../services/executionLog.service');
+} catch (_) {
+    // service unavailable — logging will be skipped
+}
+
 const RPC_URL = process.env.SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org';
 const server = new rpc.Server(RPC_URL, {
     timeout: parseInt(process.env.RPC_TIMEOUT_MS || '10000', 10),
@@ -79,6 +87,7 @@ try {
 
     enqueueAction = async function executeTriggerActionDirect(trigger, eventPayload) {
         const { actionType, actionUrl, contractId, eventName } = trigger;
+        const startTime = Date.now();
 
         logger.info('Executing action directly (no queue)', {
             actionType,
@@ -86,65 +95,99 @@ try {
             eventName,
         });
 
-        switch (actionType) {
-            case 'email':
-                return await sendEventNotification({
-                    trigger,
-                    payload: eventPayload,
-                });
+        try {
+            let result;
 
-            case 'discord':
-                if (!actionUrl) {
-                    throw new Error('Missing actionUrl for Discord trigger');
-                }
-                const discordPayload = {
-                    embeds: [{
-                        title: `Event: ${eventName}`,
-                        description: `Contract: ${contractId}`,
-                        fields: [{
-                            name: 'Payload',
-                            value: `\`\`\`json\n${JSON.stringify(eventPayload, null, 2).slice(0, 1000)}\n\`\`\``,
+            switch (actionType) {
+                case 'email':
+                    result = await sendEventNotification({
+                        trigger,
+                        payload: eventPayload,
+                    });
+                    break;
+
+                case 'discord': {
+                    if (!actionUrl) {
+                        throw new Error('Missing actionUrl for Discord trigger');
+                    }
+                    const discordPayload = {
+                        embeds: [{
+                            title: `Event: ${eventName}`,
+                            description: `Contract: ${contractId}`,
+                            fields: [{
+                                name: 'Payload',
+                                value: `\`\`\`json\n${JSON.stringify(eventPayload, null, 2).slice(0, 1000)}\n\`\`\``,
+                            }],
+                            color: 0x5865F2,
+                            timestamp: new Date().toISOString(),
                         }],
-                        color: 0x5865F2,
-                        timestamp: new Date().toISOString(),
-                    }],
-                };
-                return await sendDiscordNotification(actionUrl, discordPayload);
-
-            case 'slack':
-                return await slackService.execute(trigger, eventPayload);
-
-            case 'telegram': {
-                const botToken = process.env.TELEGRAM_BOT_TOKEN;
-                const chatId = actionUrl; // actionUrl stores the chat ID for telegram triggers
-                if (!botToken || !chatId) {
-                    throw new Error('Missing TELEGRAM_BOT_TOKEN or actionUrl (chatId) for telegram trigger');
+                    };
+                    result = await sendDiscordNotification(actionUrl, discordPayload);
+                    break;
                 }
-                const message = [
-                    '🔔 *EventHorizon Alert*',
-                    '',
-                    `*Event:* ${telegramService.escapeMarkdownV2(eventName)}`,
-                    `*Contract:* \`${telegramService.escapeMarkdownV2(contractId)}\``,
-                    '',
-                    `\`\`\`json`,
-                    telegramService.escapeMarkdownV2(JSON.stringify(eventPayload, null, 2)),
-                    `\`\`\``,
-                ].join('\n');
-                return await telegramService.sendTelegramMessage(botToken, chatId, message);
+
+                case 'slack':
+                    result = await slackService.execute(trigger, eventPayload);
+                    break;
+
+                case 'telegram': {
+                    const botToken = process.env.TELEGRAM_BOT_TOKEN;
+                    const chatId = actionUrl; // actionUrl stores the chat ID for telegram triggers
+                    if (!botToken || !chatId) {
+                        throw new Error('Missing TELEGRAM_BOT_TOKEN or actionUrl (chatId) for telegram trigger');
+                    }
+                    const message = [
+                        '🔔 *EventHorizon Alert*',
+                        '',
+                        `*Event:* ${telegramService.escapeMarkdownV2(eventName)}`,
+                        `*Contract:* \`${telegramService.escapeMarkdownV2(contractId)}\``,
+                        '',
+                        '```json',
+                        telegramService.escapeMarkdownV2(JSON.stringify(eventPayload, null, 2)),
+                        '```',
+                    ].join('\n');
+                    result = await telegramService.sendTelegramMessage(botToken, chatId, message);
+                    break;
+                }
+
+                case 'webhook': {
+                    if (!actionUrl) {
+                        throw new Error('Missing actionUrl for webhook trigger');
+                    }
+                    result = await webhookService.sendSignedWebhook(actionUrl, {
+                        contractId,
+                        eventName,
+                        payload: eventPayload,
+                    }, trigger.webhookSecret, { organizationId: trigger.organization });
+                    break;
+                }
+
+                default:
+                    throw new Error(`Unsupported action type: ${actionType}`);
             }
 
-            case 'webhook':
-                if (!actionUrl) {
-                    throw new Error('Missing actionUrl for webhook trigger');
-                }
-                return await webhookService.sendSignedWebhook(actionUrl, {
-                    contractId,
-                    eventName,
-                    payload: eventPayload,
-                }, trigger.webhookSecret, { organizationId: trigger.organization });
+            // Log success to TimescaleDB (fire-and-forget)
+            if (executionLogService) {
+                executionLogService.logSuccess(trigger, {
+                    durationMs: Date.now() - startTime,
+                    ledgerSequence: eventPayload && eventPayload.ledger,
+                    payloadSnapshot: eventPayload,
+                    source: 'direct',
+                }).catch(() => {});
+            }
 
-            default:
-                throw new Error(`Unsupported action type: ${actionType}`);
+            return result;
+        } catch (err) {
+            // Log failure to TimescaleDB (fire-and-forget)
+            if (executionLogService) {
+                executionLogService.logFailure(trigger, err, {
+                    durationMs: Date.now() - startTime,
+                    ledgerSequence: eventPayload && eventPayload.ledger,
+                    payloadSnapshot: eventPayload,
+                    source: 'direct',
+                }).catch(() => {});
+            }
+            throw err;
         }
     };
 }
