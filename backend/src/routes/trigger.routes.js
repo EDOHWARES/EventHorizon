@@ -148,6 +148,7 @@ router.put('/:id',
     authMiddleware,
     permissionMiddleware('update_trigger'),
     auditMiddleware.auditUpdate(),
+    validateBody(validationSchemas.triggerUpdate),
     triggerController.updateTrigger
 );
 

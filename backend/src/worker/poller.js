@@ -71,14 +71,11 @@ try {
     });
 
     // Fallback: direct execution with full action routing
-    const { sendEventNotification } = require('../services/email.service');
-    const { sendDiscordNotification } = require('../services/discord.service');
-    const slackService = require('../services/slack.service');
-    const telegramService = require('../services/telegram.service');
-    const webhookService = require('../services/webhook.service');
+    const { executeSingleAction } = require('../services/actionExecutor.service');
+    const { executeWorkflow } = require('../services/workflow.service');
 
     enqueueAction = async function executeTriggerActionDirect(trigger, eventPayload) {
-        const { actionType, actionUrl, contractId, eventName } = trigger;
+        const { actionType, contractId, eventName } = trigger;
 
         logger.info('Executing action directly (no queue)', {
             actionType,
@@ -86,66 +83,11 @@ try {
             eventName,
         });
 
-        switch (actionType) {
-            case 'email':
-                return await sendEventNotification({
-                    trigger,
-                    payload: eventPayload,
-                });
-
-            case 'discord':
-                if (!actionUrl) {
-                    throw new Error('Missing actionUrl for Discord trigger');
-                }
-                const discordPayload = {
-                    embeds: [{
-                        title: `Event: ${eventName}`,
-                        description: `Contract: ${contractId}`,
-                        fields: [{
-                            name: 'Payload',
-                            value: `\`\`\`json\n${JSON.stringify(eventPayload, null, 2).slice(0, 1000)}\n\`\`\``,
-                        }],
-                        color: 0x5865F2,
-                        timestamp: new Date().toISOString(),
-                    }],
-                };
-                return await sendDiscordNotification(actionUrl, discordPayload);
-
-            case 'slack':
-                return await slackService.execute(trigger, eventPayload);
-
-            case 'telegram': {
-                const botToken = process.env.TELEGRAM_BOT_TOKEN;
-                const chatId = actionUrl; // actionUrl stores the chat ID for telegram triggers
-                if (!botToken || !chatId) {
-                    throw new Error('Missing TELEGRAM_BOT_TOKEN or actionUrl (chatId) for telegram trigger');
-                }
-                const message = [
-                    '🔔 *EventHorizon Alert*',
-                    '',
-                    `*Event:* ${telegramService.escapeMarkdownV2(eventName)}`,
-                    `*Contract:* \`${telegramService.escapeMarkdownV2(contractId)}\``,
-                    '',
-                    `\`\`\`json`,
-                    telegramService.escapeMarkdownV2(JSON.stringify(eventPayload, null, 2)),
-                    `\`\`\``,
-                ].join('\n');
-                return await telegramService.sendTelegramMessage(botToken, chatId, message);
-            }
-
-            case 'webhook':
-                if (!actionUrl) {
-                    throw new Error('Missing actionUrl for webhook trigger');
-                }
-                return await webhookService.sendSignedWebhook(actionUrl, {
-                    contractId,
-                    eventName,
-                    payload: eventPayload,
-                }, trigger.webhookSecret, { organizationId: trigger.organization });
-
-            default:
-                throw new Error(`Unsupported action type: ${actionType}`);
+        if (trigger.steps?.length > 0) {
+            return await executeWorkflow(trigger, eventPayload);
         }
+
+        return await executeSingleAction(trigger, eventPayload);
     };
 }
 

@@ -27,6 +27,53 @@ const filtersSchema = Joi.array()
         'any.invalid': '{{#message}}',
     });
 
+const workflowStepIdSchema = Joi.string()
+    .trim()
+    .pattern(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/)
+    .required()
+    .messages({
+        'string.pattern.base': 'Workflow step id must start with a letter and contain only letters, numbers, underscores, or hyphens',
+    });
+
+const workflowStepSchema = Joi.object({
+    id: workflowStepIdSchema,
+    name: Joi.string().trim(),
+    actionType: Joi.string().valid('webhook', 'discord', 'email', 'telegram').required(),
+    actionUrl: Joi.string().trim(),
+    webhookSecret: Joi.string(),
+    config: Joi.object().unknown(true).default({}),
+    runIf: Joi.string().valid('success', 'failure', 'always').default('success'),
+}).custom((value, helpers) => {
+    if (['webhook', 'discord'].includes(value.actionType) && !value.actionUrl) {
+        return helpers.error('any.invalid', {
+            message: `Workflow step "${value.id}" requires actionUrl for ${value.actionType}`,
+        });
+    }
+    if (['webhook', 'discord'].includes(value.actionType)) {
+        const { error } = Joi.string().uri().validate(value.actionUrl);
+        if (error) {
+            return helpers.error('any.invalid', {
+                message: `Workflow step "${value.id}" actionUrl must be a valid URI`,
+            });
+        }
+    }
+    return value;
+}, 'workflow step validation').messages({
+    'any.invalid': '{{#message}}',
+});
+
+const workflowStepsSchema = Joi.array()
+    .items(workflowStepSchema)
+    .max(20)
+    .unique('id')
+    .messages({
+        'array.unique': 'Workflow step ids must be unique',
+    });
+
+const workflowConfigSchema = Joi.object({
+    continueOnError: Joi.boolean().default(false),
+});
+
 const cidrSchema = Joi.string().trim().custom((value, helpers) => {
     try {
         ipWhitelistService.normalizeCidr(value);
@@ -42,11 +89,49 @@ const validationSchemas = {
     triggerCreate: Joi.object({
         contractId: Joi.string().trim().required(),
         eventName: Joi.string().trim().required(),
-        actionType: Joi.string().valid('webhook', 'discord', 'email', 'telegram').default('webhook'),
-        actionUrl: Joi.string().trim().uri().required(),
+        actionType: Joi.string().valid('webhook', 'discord', 'email', 'telegram'),
+        actionUrl: Joi.string().trim().uri(),
         isActive: Joi.boolean().default(true),
         lastPolledLedger: Joi.number().integer().min(0).default(0),
         filters: filtersSchema.default([]),
+        steps: workflowStepsSchema.default([]),
+        workflowConfig: workflowConfigSchema.default({ continueOnError: false }),
+    }).custom((value, helpers) => {
+        const hasWorkflowSteps = Array.isArray(value.steps) && value.steps.length > 0;
+        if (hasWorkflowSteps && value.actionUrl) {
+            return helpers.error('any.invalid', {
+                message: 'Workflow triggers cannot also define top-level actionUrl',
+            });
+        }
+        if (!hasWorkflowSteps && !value.actionUrl) {
+            return helpers.error('any.invalid', {
+                message: 'Trigger actionUrl is required when steps are not provided',
+            });
+        }
+        return value;
+    }, 'trigger workflow validation').messages({
+        'any.invalid': '{{#message}}',
+    }),
+    triggerUpdate: Joi.object({
+        contractId: Joi.string().trim(),
+        eventName: Joi.string().trim(),
+        actionType: Joi.string().valid('webhook', 'discord', 'email', 'telegram'),
+        actionUrl: Joi.string().trim().uri(),
+        isActive: Joi.boolean(),
+        lastPolledLedger: Joi.number().integer().min(0),
+        filters: filtersSchema,
+        steps: workflowStepsSchema,
+        workflowConfig: workflowConfigSchema,
+    }).min(1).custom((value, helpers) => {
+        const hasWorkflowSteps = Array.isArray(value.steps) && value.steps.length > 0;
+        if (hasWorkflowSteps && value.actionUrl) {
+            return helpers.error('any.invalid', {
+                message: 'Workflow triggers cannot also define top-level actionUrl',
+            });
+        }
+        return value;
+    }, 'trigger workflow update validation').messages({
+        'any.invalid': '{{#message}}',
     }),
     authCredentials: Joi.object({
         email: Joi.string().trim().email().required(),

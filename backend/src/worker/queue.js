@@ -25,9 +25,12 @@ const getActionQueue = (network = 'testnet') => {
 const enqueueAction = async (trigger, eventPayload) => {
     const network = trigger.network || 'testnet';
     const queue = getActionQueue(network);
+    const jobName = trigger.steps?.length > 0
+        ? `workflow-${trigger._id}`
+        : `${trigger.actionType}-${trigger._id}`;
     
     await queue.add(
-        `${trigger.actionType}-${trigger._id}`, 
+        jobName,
         { trigger, eventPayload },
         {
             attempts: trigger.retryConfig?.maxRetries || 3,

@@ -1,10 +1,7 @@
 const { Worker } = require('bullmq');
 const Redis = require('ioredis');
-const axios = require('axios');
-const { sendEventNotification } = require('../services/email.service');
-const { sendDiscordNotification } = require('../services/discord.service');
-const telegramService = require('../services/telegram.service');
-const webhookService = require('../services/webhook.service');
+const { executeSingleAction } = require('../services/actionExecutor.service');
+const { executeWorkflow } = require('../services/workflow.service');
 const logger = require('../config/logger');
 
 const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
@@ -25,7 +22,8 @@ const connection = new Redis({
  */
 async function executeAction(job) {
     const { trigger, eventPayload, eventPayloads, isBatch } = job.data;
-    const { actionType, actionUrl, contractId, eventName } = trigger;
+    const { contractId, eventName } = trigger;
+    const actionType = trigger.steps?.length > 0 ? 'workflow' : trigger.actionType;
 
     const batchSize = isBatch ? eventPayloads.length : 1;
 
@@ -40,92 +38,22 @@ async function executeAction(job) {
     });
 
     if (isBatch) {
-        return await executeBatchAction(trigger, eventPayloads);
-    } else {
-        return await executeSingleAction(trigger, eventPayload);
+        return await executeBatchAction(trigger, eventPayloads, { runIdPrefix: job.id });
     }
-}
 
-/**
- * Execute a single action
- */
-async function executeSingleAction(trigger, eventPayload) {
-    const { actionType, actionUrl, contractId, eventName } = trigger;
-
-    switch (actionType) {
-        case 'email': {
-            return await sendEventNotification({
-                trigger,
-                payload: eventPayload,
-            });
-        }
-
-        case 'discord': {
-            if (!actionUrl) {
-                throw new Error('Missing actionUrl for Discord trigger');
-            }
-
-            const discordPayload = {
-                embeds: [{
-                    title: `Event: ${eventName}`,
-                    description: `Contract: ${contractId}`,
-                    fields: [
-                        {
-                            name: 'Payload',
-                            value: `\`\`\`json\n${JSON.stringify(eventPayload, null, 2).slice(0, 1000)}\n\`\`\``,
-                        },
-                    ],
-                    color: 0x5865F2,
-                    timestamp: new Date().toISOString(),
-                }],
-            };
-
-            return await sendDiscordNotification(actionUrl, discordPayload);
-        }
-
-        case 'telegram': {
-            const { botToken, chatId } = trigger;
-            if (!botToken || !chatId) {
-                throw new Error('Missing botToken or chatId for Telegram trigger');
-            }
-
-            const message = `🔔 *Event Triggered*\n\n` +
-                `*Event:* ${telegramService.escapeMarkdownV2(eventName)}\n` +
-                `*Contract:* \`${contractId}\`\n\n` +
-                `*Payload:*\n\`\`\`\n${JSON.stringify(eventPayload, null, 2)}\n\`\`\``;
-
-            return await telegramService.sendTelegramMessage(botToken, chatId, message);
-        }
-
-        case 'webhook': {
-            if (!actionUrl) {
-                throw new Error('Missing actionUrl for webhook trigger');
-            }
-
-            const payload = {
-                contractId,
-                eventName,
-                payload: eventPayload,
-            };
-
-            return await webhookService.sendSignedWebhook(
-                actionUrl,
-                payload,
-                trigger.webhookSecret,
-                { organizationId: trigger.organization }
-            );
-        }
-
-        default:
-            throw new Error(`Unsupported action type: ${actionType}`);
+    if (trigger.steps?.length > 0) {
+        return await executeWorkflow(trigger, eventPayload, { runId: String(job.id) });
     }
+
+    return await executeSingleAction(trigger, eventPayload);
 }
 
 /**
  * Execute a batch action with error handling for individual events
  */
-async function executeBatchAction(trigger, eventPayloads) {
-    const { actionType, actionUrl, contractId, eventName, batchingConfig } = trigger;
+async function executeBatchAction(trigger, eventPayloads, options = {}) {
+    const { contractId, eventName, batchingConfig } = trigger;
+    const actionType = trigger.steps?.length > 0 ? 'workflow' : trigger.actionType;
     const continueOnError = batchingConfig?.continueOnError ?? true;
 
     const results = {
@@ -147,79 +75,22 @@ async function executeBatchAction(trigger, eventPayloads) {
         const eventPayload = eventPayloads[i];
 
         try {
-            switch (actionType) {
-                case 'email': {
-                    await sendEventNotification({
-                        trigger,
-                        payload: eventPayload,
-                    });
-                    break;
-                }
+            if (trigger.steps?.length > 0) {
+                await executeWorkflow(trigger, eventPayload, {
+                    runId: options.runIdPrefix ? `${options.runIdPrefix}:${i}` : undefined,
+                    executeStep: options.executeStep,
+                });
+            } else {
+                const webhookPayload = actionType === 'webhook' ? {
+                    contractId,
+                    eventName,
+                    payload: eventPayload,
+                    batchIndex: i,
+                    batchSize: eventPayloads.length,
+                    batchPayloads: eventPayloads,
+                } : undefined;
 
-                case 'discord': {
-                    if (!actionUrl) {
-                        throw new Error('Missing actionUrl for Discord trigger');
-                    }
-
-                    const discordPayload = {
-                        embeds: [{
-                            title: `Batch Event: ${eventName}`,
-                            description: `Contract: ${contractId} (${i + 1}/${eventPayloads.length})`,
-                            fields: [
-                                {
-                                    name: 'Payload',
-                                    value: `\`\`\`json\n${JSON.stringify(eventPayload, null, 2).slice(0, 1000)}\n\`\`\``,
-                                },
-                            ],
-                            color: 0x5865F2,
-                            timestamp: new Date().toISOString(),
-                        }],
-                    };
-
-                    await sendDiscordNotification(actionUrl, discordPayload);
-                    break;
-                }
-
-                case 'telegram': {
-                    const { botToken, chatId } = trigger;
-                    if (!botToken || !chatId) {
-                        throw new Error('Missing botToken or chatId for Telegram trigger');
-                    }
-
-                    const message = `🔔 *Batch Event Triggered* (${i + 1}/${eventPayloads.length})\n\n` +
-                        `*Event:* ${telegramService.escapeMarkdownV2(eventName)}\n` +
-                        `*Contract:* \`${contractId}\`\n\n` +
-                        `*Payload:*\n\`\`\`\n${JSON.stringify(eventPayload, null, 2)}\n\`\`\``;
-
-                    await telegramService.sendTelegramMessage(botToken, chatId, message);
-                    break;
-                }
-
-                case 'webhook': {
-                    if (!actionUrl) {
-                        throw new Error('Missing actionUrl for webhook trigger');
-                    }
-
-                    const payload = {
-                        contractId,
-                        eventName,
-                        payload: eventPayload,
-                        batchIndex: i,
-                        batchSize: eventPayloads.length,
-                        batchPayloads: eventPayloads, // Send the full batch for webhooks
-                    };
-
-                    await webhookService.sendSignedWebhook(
-                        actionUrl,
-                        payload,
-                        trigger.webhookSecret,
-                        { organizationId: trigger.organization }
-                    );
-                    break;
-                }
-
-                default:
-                    throw new Error(`Unsupported action type: ${actionType}`);
+                await executeSingleAction(trigger, eventPayload, { webhookPayload });
             }
 
             results.successful++;
@@ -336,4 +207,6 @@ function createWorker() {
 module.exports = {
     createWorker,
     connection,
+    executeAction,
+    executeBatchAction,
 };
