@@ -2,6 +2,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const logger = require('../config/logger');
 const { buildHeaders } = require('../utils/headerBuilder');
+const ipWhitelistService = require('./ipWhitelist.service');
 
 /**
  * Webhook service for secure outbound webhook delivery with HMAC signing
@@ -29,6 +30,14 @@ class WebhookService {
      * @returns {Promise} - Axios response
      */
     async sendSignedWebhook(url, payload, secret, options = {}) {
+        const {
+            organizationId,
+            organization,
+            headers: optionHeaders,
+            ...axiosOptions
+        } = options;
+        const effectiveOrganizationId = organizationId || organization;
+        const destination = await ipWhitelistService.validateUrl(url, effectiveOrganizationId);
         const timestamp = new Date().toISOString();
 
         // Generate signature
@@ -39,7 +48,7 @@ class WebhookService {
             'Content-Type': 'application/json',
             'X-EventHorizon-Signature': signature,
             'X-EventHorizon-Timestamp': timestamp,
-            ...options.headers
+            ...optionHeaders
         };
 
         // Add custom headers if provided
@@ -58,8 +67,10 @@ class WebhookService {
         try {
             const response = await axios.post(url, payload, {
                 headers,
-                timeout: options.timeout || 30000, // 30 second timeout
-                ...options
+                timeout: axiosOptions.timeout || 30000, // 30 second timeout
+                httpAgent: destination.agents?.httpAgent,
+                httpsAgent: destination.agents?.httpsAgent,
+                ...axiosOptions
             });
 
             logger.info('Webhook sent successfully', {

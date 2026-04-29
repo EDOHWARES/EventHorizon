@@ -1,6 +1,6 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contractimpl, contractevent, vec, Address, Env, Error, InvokeError, Symbol, Val, Vec,
+    contract, contractevent, contractimpl, vec, Address, Env, Error, IntoVal, InvokeError, Symbol, Val, Vec,
 };
 
 /// Result of a single simulation call.
@@ -17,8 +17,13 @@ pub struct SimResult {
 pub struct SimResultEvent {
     /// Matches the `call_id` supplied to `simulate`.
     pub call_id: u32,
+    /// The target contract that was called.
+    pub target: Address,
     /// `true` if the inner call succeeded, `false` if it panicked/errored.
     pub success: bool,
+    /// Placeholder for resource usage (CPU/Memory).
+    /// In Soroban, this is populated by off-chain simulation tools.
+    pub resource_usage: u64,
 }
 
 #[contract]
@@ -31,10 +36,6 @@ impl GasEstimator {
     /// Uses `try_invoke_contract` so this function **never reverts** regardless
     /// of what the target does. A `SimResultEvent` is always emitted so that
     /// EventHorizon (and Soroban RPC `simulateTransaction`) can capture it.
-    ///
-    /// Actual resource usage (CPU instructions, memory bytes) is returned by
-    /// the RPC layer in the simulation response; the emitted event lets callers
-    /// correlate success/failure with those host-reported numbers.
     pub fn simulate(
         env: Env,
         call_id: u32,
@@ -45,11 +46,38 @@ impl GasEstimator {
         let outcome: Result<Result<Val, _>, Result<Error, InvokeError>> =
             env.try_invoke_contract::<Val, Error>(&contract, &func, args);
 
-        let success = matches!(outcome, Ok(Ok(_)));
+        let (success, _result) = match outcome {
+            Ok(Ok(val)) => (true, val),
+            Ok(Err(_)) => (
+                false,
+                Error::from_type_and_code(
+                    soroban_sdk::xdr::ScErrorType::WasmVm,
+                    soroban_sdk::xdr::ScErrorCode::InvalidAction,
+                )
+                .into_val(&env),
+            ),
+            Err(_) => (
+                false,
+                Error::from_type_and_code(
+                    soroban_sdk::xdr::ScErrorType::Context,
+                    soroban_sdk::xdr::ScErrorCode::InternalError,
+                )
+                .into_val(&env),
+            ),
+        };
 
-        SimResultEvent { call_id, success }.publish(&env);
+        SimResultEvent {
+            call_id,
+            target: contract.clone(),
+            success,
+            resource_usage: 0,
+        }
+        .publish(&env);
 
-        SimResult { call_id, success }
+        SimResult {
+            call_id,
+            success,
+        }
     }
 
     /// Batch-simulate multiple calls.
@@ -66,6 +94,11 @@ impl GasEstimator {
             results.push_back(Self::simulate(env.clone(), call_id, contract, func, args));
         }
         results
+    }
+
+    /// Returns the contract version.
+    pub fn version(_env: Env) -> u32 {
+        100 // v1.0.0
     }
 }
 

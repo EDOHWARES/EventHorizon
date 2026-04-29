@@ -12,6 +12,10 @@ EventHorizon is a decentralized "If-This-Then-That" (IFTTT) platform that listen
 -   `/backend`: Node.js/Express server and Soroban event poller worker.
 -   `/frontend`: Vite/React dashboard for managing triggers.
 -   `/contracts/boilerplate`: Boilerplate Soroban Rust contract for testing.
+-   `/contracts/gas_estimator`: Resource simulation and trace capturing proxy.
+-   `/contracts/stablecoin_emitter`: Multi-sig & timelock secured supply management.
+-   `/contracts/nft_royalty_emitter`: Automated multi-recipient royalty settlement.
+-   `/contracts/oracle_aggregator`: Median-of-N price consensus engine.
 -   `/contracts/token_vesting`: Secure token vesting contract with linear release and cliff.
 -   `/contracts/staking`: Reward-based staking contract with early unstake penalties.
 
