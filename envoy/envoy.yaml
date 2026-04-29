@@ -1,0 +1,62 @@
+static_resources:
+  listeners:
+    - name: listener_0
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 8080 }
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: ingress_http
+                route_config:
+                  name: local_route
+                  virtual_hosts:
+                    - name: backend
+                      domains: ["*"]
+                      routes:
+                        - match: { prefix: "/" }
+                          route: { cluster: backend_service }
+                http_filters:
+                  - name: envoy.filters.http.router
+        transport_socket:
+          name: envoy.transport_sockets.tls
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+            common_tls_context:
+              tls_certificates:
+                - certificate_chain: { filename: "/etc/envoy/certs/server.crt" }
+                  private_key: { filename: "/etc/envoy/certs/server.key" }
+              validation_context:
+                trusted_ca: { filename: "/etc/envoy/certs/ca.crt" }
+  clusters:
+    - name: backend_service
+      connect_timeout: 0.25s
+      type: logical_dns
+      lb_policy: round_robin
+      load_assignment:
+        cluster_name: backend_service
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address: { address: backend, port_value: 5000 }
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          common_tls_context:
+            tls_certificates:
+              - certificate_chain: { filename: "/etc/envoy/certs/client.crt" }
+                private_key: { filename: "/etc/envoy/certs/client.key" }
+            validation_context:
+              trusted_ca: { filename: "/etc/envoy/certs/ca.crt" }
+      circuit_breakers:
+        thresholds:
+          - priority: DEFAULT
+            max_connections: 100
+            max_pending_requests: 100
+            max_requests: 100
+            max_retries: 3
+volumes:
+  envoy_certs:
