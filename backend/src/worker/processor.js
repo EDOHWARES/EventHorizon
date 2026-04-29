@@ -5,6 +5,7 @@ const { sendEventNotification } = require('../services/email.service');
 const { sendDiscordNotification } = require('../services/discord.service');
 const telegramService = require('../services/telegram.service');
 const webhookService = require('../services/webhook.service');
+const systemHealthMonitorService = require('../services/systemHealthMonitor.service');
 const logger = require('../config/logger');
 
 const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
@@ -108,12 +109,30 @@ async function executeSingleAction(trigger, eventPayload) {
                 payload: eventPayload,
             };
 
-            return await webhookService.sendSignedWebhook(
-                actionUrl,
-                payload,
-                trigger.webhookSecret,
-                { organizationId: trigger.organization }
-            );
+            const startTime = Date.now();
+            try {
+                const result = await webhookService.sendSignedWebhook(
+                    actionUrl,
+                    payload,
+                    trigger.webhookSecret,
+                    { organizationId: trigger.organization }
+                );
+                
+                const responseTime = Date.now() - startTime;
+                systemHealthMonitorService.recordWebhookMetric(responseTime, 'success');
+                return result;
+            } catch (error) {
+                const responseTime = Date.now() - startTime;
+                
+                // Check if it's a rate limit error
+                if (error.response?.status === 429) {
+                    systemHealthMonitorService.recordWebhookMetric(responseTime, 'rate_limited');
+                } else {
+                    systemHealthMonitorService.recordWebhookMetric(responseTime, 'failure');
+                }
+                
+                throw error;
+            }
         }
 
         default:

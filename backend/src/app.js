@@ -12,12 +12,14 @@ const {
     errorHandler,
     notFoundHandler,
 } = require('./middleware/error.middleware');
+const recordAPIMetric = require('./middleware/recordAPIMetric.middleware');
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 app.use(requestLogger);
+app.use(recordAPIMetric);
 app.use(globalRateLimiter);
 app.use('/api/auth', authRateLimiter);
 
@@ -25,9 +27,11 @@ app.use('/api/docs', require('./routes/docs.routes'));
 app.use('/api/triggers', require('./routes/trigger.routes'));
 app.use('/api/invitations', require('./routes/invitation.routes'));
 app.use('/api/admin/ip-whitelist', require('./routes/ipWhitelist.routes'));
+app.use('/api/admin/audit', require('./routes/audit.routes'));
+app.use('/api/admin', require('./routes/systemHealth.routes'));
 // app.use('/api/team', require('./routes/team.routes'));
 app.use('/api/queue', require('./routes/queue.routes'));
-app.use('/api/discovery', require('./routes/discovery.routes'));
+app.use('/api/discovery', require('./routes/discovery.routes'));\napp.use('/api/slack', require('./routes/slack.routes'));\napp.use('/api/alerts', require('./routes/alertRule.routes'));
 /**
  * @openapi
  * /api/health:

@@ -79,13 +79,18 @@ mongoose
         const eventPoller = require('./worker/poller');
         eventPoller.start();
 
-        // Start data retention job
-        const retentionService = require('./services/retention.service');
-        setInterval(() => {
-            retentionService.archiveOldLogs().catch(error => {
-                logger.error('Data retention job failed', { error: error.message });
+        // Start health check scheduler
+        const healthCheckScheduler = require('./services/healthCheckScheduler.service');
+        try {
+            await healthCheckScheduler.startHealthChecksForAllOrganizations();
+            logger.info('Health check scheduler started');
+        } catch (error) {
+            logger.warn('Health check scheduler initialization failed', {
+                error: error.message,
             });
-        }, 24 * 60 * 60 * 1000); // Run daily
+        }
+
+        // Start data retention job\n        const retentionService = require('./services/retention.service');\n        setInterval(() => {\n            retentionService.archiveOldLogs().catch(error => {\n                logger.error('Data retention job failed', { error: error.message });\n            });\n        }, 24 * 60 * 60 * 1000); // Run daily\n\n        // Start Slack Health Monitor\n        const healthMonitor = require('./worker/healthMonitor');\n        healthMonitor.start('*/2 * * * *');
 
         app.listen(PORT, () => {
             logger.info('Server started successfully', {
@@ -98,6 +103,15 @@ mongoose
 
         process.on('SIGTERM', async () => {
             logger.info('SIGTERM received, shutting down gracefully');
+
+            // Stop health check scheduler
+            try {
+                const healthCheckScheduler = require('./services/healthCheckScheduler.service');
+                healthCheckScheduler.stopAllHealthChecks();
+                logger.info('Health check scheduler stopped');
+            } catch (error) {
+                logger.error('Error stopping health check scheduler', { error: error.message });
+            }
 
             // Flush any pending batches before shutdown
             try {
