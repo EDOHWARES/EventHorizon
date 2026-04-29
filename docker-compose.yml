@@ -59,10 +59,24 @@ services:
     networks:
       - app_network
 
+  envoy:
+    image: envoyproxy/envoy:v1.29-latest
+    container_name: eventhorizon_envoy
+    volumes:
+      - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+      - envoy_certs:/etc/envoy/certs
+    ports:
+      - "8080:8080"
+    depends_on:
+      - backend
+    networks:
+      - app_network
+
 volumes:
   mongo_data:
   redis_data:
   frontend_modules:
+  envoy_certs:
 
 networks:
   app_network:

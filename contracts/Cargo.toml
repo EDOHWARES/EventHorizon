@@ -17,9 +17,19 @@ members = [
     "prediction_market",
     "prediction_resolution_engine",
     "emitter_registry",
+    "cross_chain_bridge",
     "flash_loan",
+    "flash_loan_registry",
     "royalty_registry",
-    "session_auth",
+    "stablecoin_emitter",
+    "nft_royalty_emitter",
+    "oracle_aggregator",
+
+    "governance_timelock",
+
+    "amm_pool_v2",
+    "delegator_registry",
+    "access_whitelist",
 ]
 
 [profile.release]

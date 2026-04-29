@@ -17,6 +17,7 @@ app.use('/api/docs', require('./routes/docs.routes'));
 app.use('/api/auth', require('./routes/auth.routes'));
 app.use('/api/triggers', require('./routes/trigger.routes'));
 app.use('/api/admin/audit', require('./routes/audit.routes'));
+app.use('/api/admin/ip-whitelist', require('./routes/ipWhitelist.routes'));
 
 /**
  * @openapi
