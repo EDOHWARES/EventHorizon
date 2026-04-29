@@ -2,6 +2,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const logger = require('../config/logger');
 const breakers = require('./circuitBreaker');
+const ipWhitelistService = require('./ipWhitelist.service');
 
 /**
  * Webhook service for secure outbound webhook delivery with HMAC signing
@@ -29,6 +30,14 @@ class WebhookService {
      * @returns {Promise} - Axios response
      */
     async sendSignedWebhook(url, payload, secret, options = {}) {
+        const {
+            organizationId,
+            organization,
+            headers: optionHeaders,
+            ...axiosOptions
+        } = options;
+        const effectiveOrganizationId = organizationId || organization;
+        const destination = await ipWhitelistService.validateUrl(url, effectiveOrganizationId);
         const timestamp = new Date().toISOString();
 
         // Generate signature
@@ -39,7 +48,7 @@ class WebhookService {
             'Content-Type': 'application/json',
             'X-EventHorizon-Signature': signature,
             'X-EventHorizon-Timestamp': timestamp,
-            ...options.headers
+            ...optionHeaders
         };
 
         logger.info('Sending signed webhook', {
@@ -56,10 +65,12 @@ class WebhookService {
                 (postUrl, postPayload, postConfig) => axios.post(postUrl, postPayload, postConfig),
                 [url, payload, {
                     headers,
-                    timeout: options.timeout || 30000, // 30 second timeout
-                    ...options
+                    timeout: axiosOptions.timeout || 30000, // 30 second timeout
+                    httpAgent: destination.agents?.httpAgent,
+                    httpsAgent: destination.agents?.httpsAgent,
+                    ...axiosOptions
                 }],
-                { timeout: options.timeout || 30000 }
+                { timeout: axiosOptions.timeout || 30000 }
             );
 
             logger.info('Webhook sent successfully', {

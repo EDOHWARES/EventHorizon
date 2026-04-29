@@ -71,12 +71,11 @@ try {
     });
 
     // Fallback: direct execution with full action routing
-    const axios = require('axios');
-    const breakers = require('../services/circuitBreaker');
     const { sendEventNotification } = require('../services/email.service');
     const { sendDiscordNotification } = require('../services/discord.service');
     const slackService = require('../services/slack.service');
     const telegramService = require('../services/telegram.service');
+    const webhookService = require('../services/webhook.service');
 
     enqueueAction = async function executeTriggerActionDirect(trigger, eventPayload) {
         const { actionType, actionUrl, contractId, eventName } = trigger;
@@ -138,15 +137,11 @@ try {
                 if (!actionUrl) {
                     throw new Error('Missing actionUrl for webhook trigger');
                 }
-                return await breakers.fire(
-                    `webhook:${actionUrl}`,
-                    (url, body) => axios.post(url, body),
-                    [actionUrl, {
-                        contractId,
-                        eventName,
-                        payload: eventPayload,
-                    }]
-                );
+                return await webhookService.sendSignedWebhook(actionUrl, {
+                    contractId,
+                    eventName,
+                    payload: eventPayload,
+                }, trigger.webhookSecret, { organizationId: trigger.organization });
 
             default:
                 throw new Error(`Unsupported action type: ${actionType}`);
