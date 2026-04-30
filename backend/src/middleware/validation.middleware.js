@@ -1,4 +1,5 @@
 const Joi = require('joi');
+const ipWhitelistService = require('../services/ipWhitelist.service');
 const {
     validateFilters,
     MAX_FILTERS_PER_TRIGGER,
@@ -25,6 +26,17 @@ const filtersSchema = Joi.array()
     .messages({
         'any.invalid': '{{#message}}',
     });
+
+const cidrSchema = Joi.string().trim().custom((value, helpers) => {
+    try {
+        ipWhitelistService.normalizeCidr(value);
+        return value;
+    } catch (error) {
+        return helpers.error('any.invalid', { message: error.message });
+    }
+}, 'IP or CIDR validation').messages({
+    'any.invalid': '{{#message}}',
+});
 
 const validationSchemas = {
     triggerCreate: Joi.object({
@@ -65,6 +77,16 @@ const validationSchemas = {
             'manage_users', 'manage_organization', 'view_audit_logs'
         )).required(),
     }),
+    ipWhitelistEntry: Joi.object({
+        cidr: cidrSchema.required(),
+        label: Joi.string().trim().allow('').default(''),
+        enabled: Joi.boolean().default(true),
+    }),
+    ipWhitelistEntryUpdate: Joi.object({
+        cidr: cidrSchema,
+        label: Joi.string().trim().allow(''),
+        enabled: Joi.boolean(),
+    }).min(1),
 };
 
 const mapValidationErrors = (details) =>

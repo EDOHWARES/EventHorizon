@@ -111,7 +111,8 @@ async function executeSingleAction(trigger, eventPayload) {
             return await webhookService.sendSignedWebhook(
                 actionUrl,
                 payload,
-                trigger.webhookSecret
+                trigger.webhookSecret,
+                { organizationId: trigger.organization }
             );
         }
 
@@ -211,7 +212,8 @@ async function executeBatchAction(trigger, eventPayloads) {
                     await webhookService.sendSignedWebhook(
                         actionUrl,
                         payload,
-                        trigger.webhookSecret
+                        trigger.webhookSecret,
+                        { organizationId: trigger.organization }
                     );
                     break;
                 }
