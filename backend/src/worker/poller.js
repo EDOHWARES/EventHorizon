@@ -77,6 +77,7 @@ try {
     const { sendDiscordNotification } = require('../services/discord.service');
     const slackService = require('../services/slack.service');
     const telegramService = require('../services/telegram.service');
+    const webhookService = require('../services/webhook.service');
 
     enqueueAction = async function executeTriggerActionDirect(trigger, eventPayload) {
         const { actionType, actionUrl, contractId, eventName } = trigger;
@@ -88,11 +89,13 @@ try {
         });
 
         switch (actionType) {
-            case 'email':
+            case 'email': {
+                const { sendEventNotification } = require('../services/email.service');
                 return await sendEventNotification({
                     trigger,
                     payload: eventPayload,
                 });
+            }
 
             case 'discord':
                 if (!actionUrl) {
@@ -138,11 +141,11 @@ try {
                 if (!actionUrl) {
                     throw new Error('Missing actionUrl for webhook trigger');
                 }
-                return await axios.post(actionUrl, {
+                return await webhookService.sendSignedWebhook(actionUrl, {
                     contractId,
                     eventName,
                     payload: eventPayload,
-                });
+                }, trigger.webhookSecret, { organizationId: trigger.organization });
 
             default:
                 throw new Error(`Unsupported action type: ${actionType}`);
@@ -285,6 +288,19 @@ async function pollEventsImpl() {
                                         error: error.message,
                                         eventLedger: event.ledger,
                                     });
+                                    // Record in DLQ for later re-driving
+                                    try {
+                                        const dlqService = require('../services/dlq.service');
+                                        await dlqService.recordFailure({
+                                            triggerId: trigger._id,
+                                            triggerSnapshot: trigger.toObject ? trigger.toObject() : trigger,
+                                            eventPayload: event,
+                                            errorMessage: error.message,
+                                            attemptsMade: (trigger.retryConfig?.maxRetries || 3) + 1,
+                                        });
+                                    } catch (dlqErr) {
+                                        logger.error('Failed to record failure in DLQ', { error: dlqErr.message });
+                                    }
                                 }
                             }
                         }
