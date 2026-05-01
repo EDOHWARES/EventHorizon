@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package poller;
+
+service InternalPoller {
+  // Standard high-speed single event propagation
+  rpc PropagateEvent (EventMessage) returns (EventResponse) {}
+  
+  // Client-side streaming for continuous, low-latency event propagation batches
+  rpc StreamEvents (stream EventMessage) returns (EventResponse) {}
+}
+
+message EventMessage {
+  string event_id = 1;
+  string event_type = 2;
+  string payload = 3; // Stringified JSON representation of the event
+  int64 timestamp = 4;
+}
+
+message EventResponse {
+  bool success = 1;
+  string message = 2;
+}

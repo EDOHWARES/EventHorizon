@@ -5,6 +5,7 @@ const correlationService = require('../services/correlation.service');
 const deduplication = require('../services/deduplication.service');
 const logger = require('../config/logger');
 const { passesFilters } = require('../utils/filterEvaluator');
+const { withSpan, setAttributes } = require('../utils/tracing');
 
 const RPC_URL = process.env.SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org';
 const server = new rpc.Server(RPC_URL, {
@@ -77,6 +78,7 @@ try {
     const { sendDiscordNotification } = require('../services/discord.service');
     const slackService = require('../services/slack.service');
     const telegramService = require('../services/telegram.service');
+    const webhookService = require('../services/webhook.service');
 
     enqueueAction = async function executeTriggerActionDirect(trigger, eventPayload) {
         const { actionType, actionUrl, contractId, eventName } = trigger;
@@ -88,11 +90,13 @@ try {
         });
 
         switch (actionType) {
-            case 'email':
+            case 'email': {
+                const { sendEventNotification } = require('../services/email.service');
                 return await sendEventNotification({
                     trigger,
                     payload: eventPayload,
                 });
+            }
 
             case 'discord':
                 if (!actionUrl) {
@@ -138,11 +142,11 @@ try {
                 if (!actionUrl) {
                     throw new Error('Missing actionUrl for webhook trigger');
                 }
-                return await axios.post(actionUrl, {
+                return await webhookService.sendSignedWebhook(actionUrl, {
                     contractId,
                     eventName,
                     payload: eventPayload,
-                });
+                }, trigger.webhookSecret, { organizationId: trigger.organization });
 
             default:
                 throw new Error(`Unsupported action type: ${actionType}`);
@@ -182,8 +186,15 @@ async function processEvent(trigger, eventPayload) {
 // --- Core Polling Logic ---
 
 async function pollEvents() {
+    return withSpan('stellar.poll.cycle', async () => pollEventsImpl(), {
+        'rpc.url': RPC_URL,
+    });
+}
+
+async function pollEventsImpl() {
     try {
         const triggers = await Trigger.find({ isActive: true });
+        setAttributes({ 'poll.active_triggers': triggers.length });
 
         if (triggers.length === 0) {
             logger.debug('No active triggers found for polling');
@@ -218,13 +229,14 @@ async function pollEvents() {
             const contractTriggers = triggersByContract[contractId];
             logger.debug(`Polling for contract: ${contractId}, triggers: ${contractTriggers.length}`);
 
+            await withSpan('stellar.poll.contract', async () => {
             try {
                 // Determine ledger bounds based on the furthest behind trigger
                 let startLedger = Math.max(...contractTriggers.map(t => t.lastPolledLedger || 0));
                 if (startLedger === 0) {
                     startLedger = Math.max(1, latestLedgerSequence - 100);
                 } else {
-                    if (startLedger >= latestLedgerSequence) continue;
+                    if (startLedger >= latestLedgerSequence) return;
                     startLedger += 1;
                 }
 
@@ -279,6 +291,19 @@ async function pollEvents() {
                                         error: error.message,
                                         eventLedger: event.ledger,
                                     });
+                                    // Record in DLQ for later re-driving
+                                    try {
+                                        const dlqService = require('../services/dlq.service');
+                                        await dlqService.recordFailure({
+                                            triggerId: trigger._id,
+                                            triggerSnapshot: trigger.toObject ? trigger.toObject() : trigger,
+                                            eventPayload: event,
+                                            errorMessage: error.message,
+                                            attemptsMade: (trigger.retryConfig?.maxRetries || 3) + 1,
+                                        });
+                                    } catch (dlqErr) {
+                                        logger.error('Failed to record failure in DLQ', { error: dlqErr.message });
+                                    }
                                 }
                             }
                         }
@@ -313,6 +338,7 @@ async function pollEvents() {
             } catch (contractError) {
                 logger.error(`Error processing contract ${contractId}:`, { error: contractError.message });
             }
+            }, { 'stellar.contract_id': contractId, 'stellar.trigger_count': contractTriggers.length });
 
             await sleep(INTER_TRIGGER_DELAY_MS);
         }

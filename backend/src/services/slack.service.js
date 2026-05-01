@@ -1,4 +1,5 @@
 const axios = require('axios');
+const breakers = require('./circuitBreaker');
 
 /**
  * Service to handle Slack Webhook notifications
@@ -102,9 +103,17 @@ class SlackService {
 
         try {
             // Slack webhook payload size limit is generally 100KB
-            const response = await axios.post(webhookUrl, message);
+            const response = await breakers.fire(
+                'slack',
+                (url, msg) => axios.post(url, msg),
+                [webhookUrl, message]
+            );
             return { success: true, data: response.data };
         } catch (error) {
+            if (error.code === 'CIRCUIT_OPEN') {
+                console.error('Slack circuit breaker OPEN — fast-failing.');
+                return { success: false, status: 503, message: 'circuit_open' };
+            }
             if (error.response) {
                 const { status, data, headers } = error.response;
 
