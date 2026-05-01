@@ -80,14 +80,14 @@ mongoose
             logger.error('Vault initialization failed', { error: error.message });
         }
 
-        let worker = null;
+        let scaler = null;
 
         try {
-            const { createWorker } = require('./worker/processor');
-            worker = createWorker();
-            logger.info('BullMQ queue system enabled');
+            const { startScaler } = require('./worker/scaler');
+            scaler = startScaler();
+            logger.info('BullMQ worker scaler started');
         } catch (error) {
-            logger.warn('BullMQ worker initialization failed - queue system disabled', {
+            logger.warn('BullMQ worker scaler initialization failed - queue system disabled', {
                 error: error.message,
                 note: 'Install and start Redis to enable background job processing',
             });
@@ -125,8 +125,8 @@ mongoose
                 logger.error('Error flushing batches during shutdown', { error: error.message });
             }
 
-            if (worker) {
-                await worker.close();
+            if (scaler) {
+                await scaler.stop();
             }
 
             await mongoose.connection.close();
