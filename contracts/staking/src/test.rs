@@ -29,9 +29,9 @@ fn test_staking_rewards_and_penalty() {
     // Initialization: 
     // Reward Rate: 100 units per token per day (scaled by 1e6)
     // Lock-up period: 1000 seconds
-    // Penalty rate: 10%
+    // Penalty rate: 10% (1000 bps)
     let daily_rate = 100 * SCALAR / (24 * 60 * 60); // Roughly bits per token-second
-    client.initialize(&admin, &staking_token_addr, &reward_token_addr, &daily_rate, &1000, &10);
+    client.initialize(&admin, &staking_token_addr, &reward_token_addr, &daily_rate, &1000, &1000);
 
     // Initial funding
     staking_admin.mint(&user, &1000);
@@ -47,12 +47,14 @@ fn test_staking_rewards_and_penalty() {
     let pending = client.get_pending_rewards(&user);
     assert!(pending > 0);
 
-    // UNSTAKE EARLY (Expect 10% penalty)
-    // 1000 - 10% = 900
+    // UNSTAKE EARLY (Expect exponential penalty)
+    // base penalty = 10%, half-life = 200s
+    // elapsed = 500s -> 2.5 half-lives
+    // Penalty drops from 100 to 19. Total withdrawn: 1000 - 19 = 981
     // Rewards are also claimed
     let total_withdrawn = client.unstake(&user);
-    assert_eq!(total_withdrawn, 900);
-    assert_eq!(staking_token.balance(&user), 900);
+    assert_eq!(total_withdrawn, 981);
+    assert_eq!(staking_token.balance(&user), 981);
     assert!(reward_token.balance(&user) > 0); // User got some rewards too
 
     // RESET AND RESTAKE for lock-up test
@@ -63,7 +65,7 @@ fn test_staking_rewards_and_penalty() {
     // UNSTAKE LATE (Expect no penalty)
     let total_withdrawn2 = client.unstake(&user);
     assert_eq!(total_withdrawn2, 1000);
-    assert_eq!(staking_token.balance(&user), 1000);
+    assert_eq!(staking_token.balance(&user), 1981); // 981 from earlier + 1000
 }
 
 #[test]
@@ -113,4 +115,39 @@ fn test_prevent_re_init() {
 
     client.initialize(&addr, &addr, &addr, &1, &0, &0);
     client.initialize(&addr, &addr, &addr, &1, &0, &0);
+}
+
+#[test]
+fn test_emergency_withdrawal() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let user = Address::generate(&env);
+    let admin = Address::generate(&env);
+    let staking_token_addr = env.register_stellar_asset_contract_v2(admin.clone()).address();
+    let reward_token_addr = env.register_stellar_asset_contract_v2(admin.clone()).address();
+    
+    let staking_admin = StellarAssetClient::new(&env, &staking_token_addr);
+    let reward_admin = StellarAssetClient::new(&env, &reward_token_addr);
+    
+    let contract_id = env.register(StakingContract, ());
+    let client = StakingContractClient::new(&env, &contract_id);
+
+    client.initialize(&admin, &staking_token_addr, &reward_token_addr, &100, &1000, &5000);
+
+    staking_admin.mint(&user, &1000);
+    reward_admin.mint(&contract_id, &1_000_000);
+
+    client.stake(&user, &1000);
+
+    // Emergency withdraw, should bypass penalty and rewards
+    let withdrawn = client.emergency_withdraw(&user);
+    assert_eq!(withdrawn, 1000);
+    
+    let staking_token = TokenClient::new(&env, &staking_token_addr);
+    assert_eq!(staking_token.balance(&user), 1000);
+    
+    // Total staked should be 0
+    // Just to ensure nothing breaks, user can restake
+    client.stake(&user, &1000);
 }
