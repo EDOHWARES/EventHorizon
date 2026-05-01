@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { encrypt, decrypt } = require('../utils/crypto');
 
 const FILTER_OPERATORS = [
     'eq',
@@ -119,6 +120,18 @@ const triggerSchema = new mongoose.Schema({
     filters: {
         type: [filterSchema],
         default: [],
+    },
+    authConfig: {
+        type: {
+            type: String,
+            enum: ['none', 'oauth2'],
+            default: 'none'
+        },
+        oauth2: {
+            tokenUrl: String,
+            clientId: String,
+            clientSecret: String
+        }
     }
 }, {
     timestamps: true,
@@ -140,6 +153,20 @@ triggerSchema.virtual('healthStatus').get(function() {
     if (score >= 70) return 'degraded';
     return 'critical';
 });
+
+triggerSchema.pre('save', function(next) {
+    if (this.isModified('authConfig.oauth2.clientSecret') && this.authConfig?.oauth2?.clientSecret) {
+        this.authConfig.oauth2.clientSecret = encrypt(this.authConfig.oauth2.clientSecret);
+    }
+    next();
+});
+
+triggerSchema.methods.getDecryptedClientSecret = function() {
+    if (this.authConfig?.type === 'oauth2' && this.authConfig?.oauth2?.clientSecret) {
+        return decrypt(this.authConfig.oauth2.clientSecret);
+    }
+    return null;
+};
 
 const Trigger = mongoose.model('Trigger', triggerSchema);
 

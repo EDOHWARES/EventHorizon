@@ -4,6 +4,7 @@ const axios = require('axios');
 const { sendEventNotification } = require('../services/email.service');
 const { sendDiscordNotification } = require('../services/discord.service');
 const telegramService = require('../services/telegram.service');
+const { getAccessToken } = require('../services/oauth2.service');
 const webhookService = require('../services/webhook.service');
 const logger = require('../config/logger');
 
@@ -102,6 +103,19 @@ async function executeSingleAction(trigger, eventPayload) {
                 throw new Error('Missing actionUrl for webhook trigger');
             }
 
+            const headers = {};
+            if (trigger.authConfig?.type === 'oauth2') {
+                const token = await getAccessToken(trigger);
+                if (token) {
+                    headers['Authorization'] = `Bearer ${token}`;
+                }
+            }
+
+            return await axios.post(actionUrl, {
+                contractId,
+                eventName,
+                payload: eventPayload,
+            }, { headers });
             const payload = {
                 contractId,
                 eventName,
@@ -128,6 +142,17 @@ async function executeBatchAction(trigger, eventPayloads) {
     const { actionType, actionUrl, contractId, eventName, batchingConfig } = trigger;
     const continueOnError = batchingConfig?.continueOnError ?? true;
 
+    let webhookHeaders = {};
+    if (actionType === 'webhook' && trigger.authConfig?.type === 'oauth2') {
+        try {
+            const token = await getAccessToken(trigger);
+            if (token) {
+                webhookHeaders['Authorization'] = `Bearer ${token}`;
+            }
+        } catch (error) {
+            logger.error('Failed to fetch token for batch', { error: error.message });
+            if (!continueOnError) throw error;
+        }
     // Special handling for optimized webhook batching
     if (actionType === 'webhook') {
         return await executeWebhookBatchAction(trigger, eventPayloads);
@@ -212,6 +237,7 @@ async function executeBatchAction(trigger, eventPayloads) {
                         batchIndex: i,
                         batchSize: eventPayloads.length,
                         batchPayloads: eventPayloads, // Send the full batch for webhooks
+                    }, { headers: webhookHeaders });
                     };
 
                     await webhookService.sendSignedWebhook(
