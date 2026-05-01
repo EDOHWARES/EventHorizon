@@ -24,10 +24,14 @@ app.use('/api/auth', authRateLimiter);
 app.use('/api/docs', require('./routes/docs.routes'));
 app.use('/api/triggers', require('./routes/trigger.routes'));
 app.use('/api/invitations', require('./routes/invitation.routes'));
+app.use('/api/admin/ip-whitelist', require('./routes/ipWhitelist.routes'));
 // app.use('/api/team', require('./routes/team.routes'));
 app.use('/api/queue', require('./routes/queue.routes'));
+app.use('/api/dlq', require('./routes/dlq.routes'));
+app.use('/api/dlq', require('./routes/dlq.routes'));
 app.use('/api/discovery', require('./routes/discovery.routes'));
 app.use('/api/dlq', require('./routes/dlq.routes'));
+app.use('/api/escrow', require('./routes/escrow.routes'));
 /**
  * @openapi
  * /api/health:
@@ -49,6 +53,7 @@ app.use('/api/dlq', require('./routes/dlq.routes'));
  *                   example: ok
  */
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
+app.use('/api/health', require('./routes/health.routes'));
 
 app.use(errorLogger);
 app.use(notFoundHandler);

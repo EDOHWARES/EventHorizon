@@ -36,6 +36,20 @@ const enqueueAction = async (trigger, eventPayload) => {
     );
 };
 
+const enqueueBatchAction = async (trigger, eventPayloads) => {
+    const network = trigger.network || 'testnet';
+    const queue = getActionQueue(network);
+    
+    await queue.add(
+        `${trigger.actionType}-${trigger._id}-batch-${Date.now()}`, 
+        { trigger, eventPayloads, isBatch: true },
+        {
+            attempts: trigger.retryConfig?.maxRetries || 3,
+            backoff: { type: 'exponential', delay: trigger.retryConfig?.retryIntervalMs || 2000 }
+        }
+    );
+};
+
 const getQueueStats = async () => {
     const stats = {};
     for (const [network, queue] of Object.entries(queues)) {
@@ -51,4 +65,4 @@ const cleanQueue = async () => {
     }
 };
 
-module.exports = { getActionQueue, enqueueAction, getQueueStats, cleanQueue, queues };
+module.exports = { getActionQueue, enqueueAction, enqueueBatchAction, getQueueStats, cleanQueue, queues };
