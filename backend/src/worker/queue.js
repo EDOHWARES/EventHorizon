@@ -1,6 +1,8 @@
 const { Queue } = require('bullmq');
-const Redis = require('ioredis');
 const networks = require('../config/networks');
+const { createRedisClient } = require('../config/redis');
+
+const connection = createRedisClient({ lazyConnect: true, maxRetriesPerRequest: null });
 const { injectContextIntoCarrier } = require('../utils/tracing');
 
 const connection = new Redis({

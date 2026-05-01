@@ -28,11 +28,11 @@ const webhookService = require('../services/webhook.service');
 const logger = require('../config/logger');
 const { withSpan, runWithExtractedContext } = require('../utils/tracing');
 
-const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
-const REDIS_PORT = process.env.REDIS_PORT || 6379;
-const REDIS_PASSWORD = process.env.REDIS_PASSWORD || undefined;
+const { createRedisClient } = require('../config/redis');
+
 const WORKER_CONCURRENCY = Number(process.env.WORKER_CONCURRENCY || 5);
 
+const connection = createRedisClient({ lazyConnect: true, maxRetriesPerRequest: null });
 const connectionConfig = {
     host: REDIS_HOST,
     port: REDIS_PORT,

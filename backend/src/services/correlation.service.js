@@ -1,16 +1,8 @@
-const Redis = require('ioredis');
+const { createRedisClient } = require('../config/redis');
 const logger = require('../config/logger');
 const { passesFilters } = require('../utils/filterEvaluator');
 
-const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
-const REDIS_PORT = process.env.REDIS_PORT || 6379;
-const REDIS_PASSWORD = process.env.REDIS_PASSWORD || undefined;
-
-const redis = new Redis({
-    host: REDIS_HOST,
-    port: REDIS_PORT,
-    password: REDIS_PASSWORD,
-});
+const redis = createRedisClient();
 
 class CorrelationService {
     async checkSequence(trigger, event) {
