@@ -21,6 +21,26 @@ services:
     networks:
       - app_network
 
+  # All-in-one Jaeger image. Exposes:
+  #   16686 — Jaeger UI
+  #   4318  — OTLP/HTTP collector (default exporter target)
+  #   14268 — Jaeger collector (when OTEL_EXPORTER=jaeger)
+  # Start with `docker compose --profile observability up jaeger`.
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    container_name: eventhorizon_jaeger
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"
+      - "4318:4318"
+      - "14268:14268"
+    profiles:
+      - observability
+    networks:
+      - app_network
+
   backend:
     build:
       context: ./backend
@@ -59,10 +79,24 @@ services:
     networks:
       - app_network
 
+  envoy:
+    image: envoyproxy/envoy:v1.29-latest
+    container_name: eventhorizon_envoy
+    volumes:
+      - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+      - envoy_certs:/etc/envoy/certs
+    ports:
+      - "8080:8080"
+    depends_on:
+      - backend
+    networks:
+      - app_network
+
 volumes:
   mongo_data:
   redis_data:
   frontend_modules:
+  envoy_certs:
 
 networks:
   app_network:
