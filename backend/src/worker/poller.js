@@ -276,6 +276,19 @@ async function pollEvents() {
                                         error: error.message,
                                         eventLedger: event.ledger,
                                     });
+                                    // Record in DLQ for later re-driving
+                                    try {
+                                        const dlqService = require('../services/dlq.service');
+                                        await dlqService.recordFailure({
+                                            triggerId: trigger._id,
+                                            triggerSnapshot: trigger.toObject ? trigger.toObject() : trigger,
+                                            eventPayload: event,
+                                            errorMessage: error.message,
+                                            attemptsMade: (trigger.retryConfig?.maxRetries || 3) + 1,
+                                        });
+                                    } catch (dlqErr) {
+                                        logger.error('Failed to record failure in DLQ', { error: dlqErr.message });
+                                    }
                                 }
                             }
                         }
