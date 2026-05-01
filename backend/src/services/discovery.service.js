@@ -1,4 +1,5 @@
 const { SorobanRpc, Networks } = require('@stellar/stellar-sdk');
+const pollerManager = require('../worker/pollerManager');
 
 class DiscoveryService {
     constructor() {
@@ -62,6 +63,13 @@ class DiscoveryService {
                 type: 'Lending'
             }
         ];
+    }
+
+    /**
+     * Assign a poller for an event request using health-aware, load-based routing.
+     */
+    async assignPoller(eventRequest) {
+        return await pollerManager.assignPollerForEvent(eventRequest);
     }
 }
 

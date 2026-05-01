@@ -22,6 +22,13 @@ const normalizeError = (error) => {
         return new AppError(`Invalid ${error.path}: ${error.value}`, 400);
     }
 
+    if (error.code === 'WEBHOOK_DESTINATION_BLOCKED') {
+        return new AppError(error.message, error.statusCode, {
+            details: error.details,
+            isOperational: true,
+        });
+    }
+
     return new AppError(
         isDevelopment() && error.message ? error.message : 'Something went wrong',
         500,

@@ -26,7 +26,18 @@ const getStrategySuggestions = async (req, res, next) => {
     }
 };
 
+const assignPoller = async (req, res, next) => {
+    try {
+        const eventRequest = req.body;
+        const poller = await discoveryService.assignPoller(eventRequest);
+        res.json({ success: true, poller });
+    } catch (error) {
+        next(error);
+    }
+};
+
 module.exports = {
     getDiscoveredContracts,
-    getStrategySuggestions
+    getStrategySuggestions,
+    assignPoller
 };

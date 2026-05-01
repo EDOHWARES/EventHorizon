@@ -46,6 +46,23 @@ const router = express.Router();
  *           type: boolean
  *           default: true
  *           example: true
+ *         authConfig:
+ *           type: object
+ *           properties:
+ *             type:
+ *               type: string
+ *               enum: [none, oauth2]
+ *               default: none
+ *             oauth2:
+ *               type: object
+ *               properties:
+ *                 tokenUrl:
+ *                   type: string
+ *                   format: uri
+ *                 clientId:
+ *                   type: string
+ *                 clientSecret:
+ *                   type: string
  *         lastPolledLedger:
  *           type: integer
  *           default: 0
@@ -85,6 +102,23 @@ const router = express.Router();
  *           type: boolean
  *           default: true
  *           example: true
+ *         authConfig:
+ *           type: object
+ *           properties:
+ *             type:
+ *               type: string
+ *               enum: [none, oauth2]
+ *               default: none
+ *             oauth2:
+ *               type: object
+ *               properties:
+ *                 tokenUrl:
+ *                   type: string
+ *                   format: uri
+ *                 clientId:
+ *                   type: string
+ *                 clientSecret:
+ *                   type: string
  *     AuthCredentials:
  *       type: object
  *       required:
