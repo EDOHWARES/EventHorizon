@@ -125,7 +125,8 @@ async function executeSingleAction(trigger, eventPayload) {
             return await webhookService.sendSignedWebhook(
                 actionUrl,
                 payload,
-                trigger.webhookSecret
+                trigger.webhookSecret,
+                { organizationId: trigger.organization }
             );
         }
 
@@ -152,6 +153,9 @@ async function executeBatchAction(trigger, eventPayloads) {
             logger.error('Failed to fetch token for batch', { error: error.message });
             if (!continueOnError) throw error;
         }
+    // Special handling for optimized webhook batching
+    if (actionType === 'webhook') {
+        return await executeWebhookBatchAction(trigger, eventPayloads);
     }
 
     const results = {
@@ -239,7 +243,8 @@ async function executeBatchAction(trigger, eventPayloads) {
                     await webhookService.sendSignedWebhook(
                         actionUrl,
                         payload,
-                        trigger.webhookSecret
+                        trigger.webhookSecret,
+                        { organizationId: trigger.organization }
                     );
                     break;
                 }
@@ -286,6 +291,65 @@ async function executeBatchAction(trigger, eventPayloads) {
     }
 
     return results;
+}
+
+/**
+ * Execute a single-request webhook batch for network throughput optimization
+ */
+async function executeWebhookBatchAction(trigger, eventPayloads) {
+    const { actionUrl, contractId, eventName } = trigger;
+
+    if (!actionUrl) {
+        throw new Error('Missing actionUrl for webhook trigger');
+    }
+
+    const batchPayload = {
+        contractId,
+        eventName,
+        isBatch: true,
+        batchSize: eventPayloads.length,
+        events: eventPayloads.map((payload, index) => ({
+            payload,
+            index,
+            timestamp: new Date().toISOString()
+        }))
+    };
+
+    logger.debug('Sending optimized webhook batch', {
+        url: actionUrl,
+        batchSize: eventPayloads.length,
+        contractId,
+        eventName
+    });
+
+    try {
+        const response = await webhookService.sendSignedWebhook(
+            actionUrl,
+            batchPayload,
+            trigger.webhookSecret
+        );
+
+        return {
+            total: eventPayloads.length,
+            successful: eventPayloads.length,
+            failed: 0,
+            status: response.status
+        };
+    } catch (error) {
+        logger.error('Optimized webhook batch failed', {
+            url: actionUrl,
+            batchSize: eventPayloads.length,
+            error: error.message
+        });
+
+        // For webhooks, we fail the entire batch if the request fails
+        return {
+            total: eventPayloads.length,
+            successful: 0,
+            failed: eventPayloads.length,
+            error: error.message
+        };
+    }
 }
 
 /**
@@ -341,6 +405,8 @@ function createWorker() {
             error: err.message,
             attemptsRemaining: job ? job.opts.attempts - job.attemptsMade : 0,
         });
+        // Fire DLQ threshold alert (non-blocking)
+        require('../services/dlq.service').checkAndAlert().catch(() => {});
     });
 
     worker.on('error', (err) => {
@@ -362,4 +428,8 @@ function createWorker() {
 module.exports = {
     createWorker,
     connection,
+    executeAction,
+    executeSingleAction,
+    executeBatchAction,
+    executeWebhookBatchAction
 };
