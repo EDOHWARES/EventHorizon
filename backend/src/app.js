@@ -12,11 +12,16 @@ const {
   errorHandler,
   notFoundHandler,
 } = require("./middleware/error.middleware");
+    errorHandler,
+    notFoundHandler,
+} = require('./middleware/error.middleware');
+const { tracingMiddleware } = require('./middleware/tracing.middleware');
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use(tracingMiddleware);
 app.use(requestLogger);
 app.use(globalRateLimiter);
 app.use("/api/auth", authRateLimiter);
@@ -29,6 +34,12 @@ app.use("/api/queue", require("./routes/queue.routes"));
 app.use("/api/discovery", require("./routes/discovery.routes"));
 
 app.use("/api/workflows", require("./routes/workflow.routes"));
+app.use('/api/queue', require('./routes/queue.routes'));
+app.use('/api/dlq', require('./routes/dlq.routes'));
+app.use('/api/dlq', require('./routes/dlq.routes'));
+app.use('/api/discovery', require('./routes/discovery.routes'));
+app.use('/api/dlq', require('./routes/dlq.routes'));
+app.use('/api/escrow', require('./routes/escrow.routes'));
 /**
  * @openapi
  * /api/health:
@@ -50,6 +61,8 @@ app.use("/api/workflows", require("./routes/workflow.routes"));
  *                   example: ok
  */
 app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
+app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
+app.use('/api/health', require('./routes/health.routes'));
 
 app.use(errorLogger);
 app.use(notFoundHandler);
