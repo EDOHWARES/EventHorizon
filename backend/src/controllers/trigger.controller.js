@@ -2,6 +2,22 @@ const Trigger = require('../models/trigger.model');
 const logger = require('../config/logger');
 const AppError = require('../utils/appError');
 const asyncHandler = require('../utils/asyncHandler');
+const ipWhitelistService = require('../services/ipWhitelist.service');
+
+async function validateWebhookDestinationIfNeeded(body, organizationId, currentTrigger = null) {
+    const actionType = body.actionType ?? currentTrigger?.actionType ?? 'webhook';
+    const actionUrl = body.actionUrl ?? currentTrigger?.actionUrl;
+
+    if (actionType !== 'webhook' || !actionUrl) {
+        return [];
+    }
+
+    const result = await ipWhitelistService.validateUrl(actionUrl, organizationId, {
+        allowDnsFailure: true,
+    });
+
+    return result.warnings || [];
+}
 
 exports.createTrigger = asyncHandler(async (req, res) => {
     logger.info('Creating new trigger', {
@@ -12,6 +28,11 @@ exports.createTrigger = asyncHandler(async (req, res) => {
         userId: req.user.id,
         organizationId: req.user.organization._id,
     });
+
+    const warnings = await validateWebhookDestinationIfNeeded(
+        req.body,
+        req.user.organization._id
+    );
 
     const trigger = new Trigger({
         ...req.body,
@@ -30,6 +51,7 @@ exports.createTrigger = asyncHandler(async (req, res) => {
     res.status(201).json({
         success: true,
         data: trigger,
+        warnings,
     });
 });
 
@@ -93,13 +115,12 @@ exports.updateTrigger = asyncHandler(async (req, res) => {
         organizationId: req.user.organization._id,
     });
 
-    const trigger = await Trigger.findOneAndUpdate(
-        { _id: req.params.id, organization: req.user.organization._id },
-        req.body,
-        { new: true, runValidators: true }
-    );
+    const existingTrigger = await Trigger.findOne({
+        _id: req.params.id,
+        organization: req.user.organization._id,
+    });
 
-    if (!trigger) {
+    if (!existingTrigger) {
         logger.warn('Trigger not found for update', {
             triggerId: req.params.id,
             ip: req.ip,
@@ -107,6 +128,18 @@ exports.updateTrigger = asyncHandler(async (req, res) => {
 
         throw new AppError('Trigger not found', 404);
     }
+
+    const warnings = await validateWebhookDestinationIfNeeded(
+        req.body,
+        req.user.organization._id,
+        existingTrigger
+    );
+
+    const trigger = await Trigger.findOneAndUpdate(
+        { _id: req.params.id, organization: req.user.organization._id },
+        req.body,
+        { new: true, runValidators: true }
+    );
 
     logger.info('Trigger updated successfully', {
         triggerId: req.params.id,
@@ -119,5 +152,6 @@ exports.updateTrigger = asyncHandler(async (req, res) => {
     res.json({
         success: true,
         data: trigger,
+        warnings,
     });
 });

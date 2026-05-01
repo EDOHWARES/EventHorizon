@@ -2,6 +2,7 @@ const axios = require('axios');
 const Credential = require('../models/credential.model');
 const { encrypt } = require('../utils/encryption');
 const { PROVIDERS } = require('../services/oauth.service');
+const breakers = require('../services/circuitBreaker');
 const logger = require('../config/logger');
 
 /**
@@ -41,15 +42,21 @@ exports.callback = async (req, res) => {
     const userId = state; // We passed userId as 'state' in authorize
 
     try {
-        const response = await axios.post(config.tokenUrl, new URLSearchParams({
-            client_id: config.clientId,
-            client_secret: config.clientSecret,
-            code,
-            redirect_uri: `${process.env.APP_URL}/api/auth/${provider}/callback`,
-            grant_type: 'authorization_code'
-        }).toString(), {
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-        });
+        const response = await breakers.fire(
+            `oauth:${provider}`,
+            (tokenUrl, body, cfg) => axios.post(tokenUrl, body, cfg),
+            [
+                config.tokenUrl,
+                new URLSearchParams({
+                    client_id: config.clientId,
+                    client_secret: config.clientSecret,
+                    code,
+                    redirect_uri: `${process.env.APP_URL}/api/auth/${provider}/callback`,
+                    grant_type: 'authorization_code'
+                }).toString(),
+                { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+            ]
+        );
 
         const { access_token, refresh_token, expires_in, scope } = response.data;
 

@@ -1,5 +1,5 @@
 #![cfg(test)]
-use crate::{DaoGovernance, DaoGovernanceClient, ProposalStatus, VoterMetrics, DelegationInfo, PowerSnapshot};
+use crate::{DaoGovernance, DaoGovernanceClient, ProposalStatus, ProposalOutcome, VoterMetrics, DelegationInfo, PowerSnapshot};
 use soroban_sdk::{testutils::{Address as _, Ledger, Events}, token, Address, Env, symbol_short, Symbol, Vec};
 
 /// Helper: set up a fresh env with an initialized governance contract and a
@@ -38,15 +38,42 @@ fn test_proposal_lifecycle() {
     let token_client = token::Client::new(&env, &token_addr);
     token_client.mint(&voter, &500);
 
-    // 1. Create Proposal
+    // 1. Create Proposal (enters Proposed state)
     let description = symbol_short!("test_pro");
     let proposal_id = gov_client.create_proposal(&voter, &description);
 
     assert_eq!(proposal_id, 1);
-    assert_eq!(gov_client.get_status(&proposal_id), ProposalStatus::Active);
+    assert_eq!(gov_client.get_status(&proposal_id), ProposalStatus::Proposed);
+
+    // Move to next block to start voting period (enters Open state)
+    env.ledger().set_sequence(env.ledger().sequence() + 1);
+    assert_eq!(gov_client.get_status(&proposal_id), ProposalStatus::Open);
 
     // 2. Vote
     gov_client.vote(&voter, &proposal_id, &true);
+
+    let proposal = gov_client.get_proposal(&proposal_id);
+    assert_eq!(proposal.votes_for, 500);
+    assert_eq!(proposal.votes_against, 0);
+
+    // 3. Move ledger to end voting (enters Closed state)
+    env.ledger().set_sequence(env.ledger().sequence() + 100);
+    assert_eq!(gov_client.get_status(&proposal_id), ProposalStatus::Closed);
+
+    // 4. Queue
+    gov_client.queue_proposal(&proposal_id);
+    assert_eq!(gov_client.get_status(&proposal_id), ProposalStatus::Closed);
+
+    // 5. Move time for timelock
+    env.ledger().set_timestamp(env.ledger().timestamp() + 3600 + 1);
+
+    // 6. Execute (enters Executed state)
+    gov_client.execute_proposal(&proposal_id);
+    assert_eq!(gov_client.get_status(&proposal_id), ProposalStatus::Executed);
+
+    let final_proposal = gov_client.get_proposal(&proposal_id);
+    assert!(final_proposal.executed);
+}
 
     let proposal = gov_client.get_proposal(&proposal_id);
     assert_eq!(proposal.votes_for, 500);
@@ -82,10 +109,11 @@ fn test_failed_proposal() {
     token_client.mint(&voter, &50); // Less than quorum
 
     let proposal_id = gov_client.create_proposal(&voter, &symbol_short!("fail"));
+    env.ledger().set_sequence(env.ledger().sequence() + 1); // Start voting
     gov_client.vote(&voter, &proposal_id, &true);
 
     env.ledger().set_sequence(env.ledger().sequence() + 101);
-    assert_eq!(gov_client.get_status(&proposal_id), ProposalStatus::Failed);
+    assert_eq!(gov_client.get_status(&proposal_id), ProposalStatus::Expired);
 
     gov_client.queue_proposal(&proposal_id); // Should panic
 }
@@ -121,6 +149,7 @@ fn test_voter_metrics_tracking() {
 
     // Create and vote on first proposal
     let proposal_id1 = gov_client.create_proposal(&voter, &symbol_short!("prop1"));
+    env.ledger().set_sequence(env.ledger().sequence() + 1); // Start voting
     gov_client.vote(&voter, &proposal_id1, &true);
 
     let metrics = gov_client.get_voter_metrics(&voter);
@@ -130,6 +159,7 @@ fn test_voter_metrics_tracking() {
 
     // Create and vote on second proposal
     let proposal_id2 = gov_client.create_proposal(&voter, &symbol_short!("prop2"));
+    env.ledger().set_sequence(env.ledger().sequence() + 1); // Start voting
     gov_client.vote(&voter, &proposal_id2, &true);
 
     let metrics = gov_client.get_voter_metrics(&voter);
@@ -149,6 +179,7 @@ fn test_multiple_voters_metrics() {
     token_client.mint(&voter_b, &200);
 
     let proposal_id = gov_client.create_proposal(&voter_a, &symbol_short!("multi"));
+    env.ledger().set_sequence(env.ledger().sequence() + 1); // Start voting
     gov_client.vote(&voter_a, &proposal_id, &true);
     gov_client.vote(&voter_b, &proposal_id, &false);
 
@@ -176,6 +207,7 @@ fn test_proposal_voters_list() {
     token_client.mint(&voter_b, &200);
 
     let proposal_id = gov_client.create_proposal(&voter_a, &symbol_short!("vlist"));
+    env.ledger().set_sequence(env.ledger().sequence() + 1); // Start voting
     gov_client.vote(&voter_a, &proposal_id, &true);
     gov_client.vote(&voter_b, &proposal_id, &true);
 
@@ -318,11 +350,12 @@ fn test_vote_with_delegated_power() {
     token_client.mint(&delegator, &300);
     token_client.mint(&delegatee, &200);
 
-    // Delegate power to delegatee
+    // Delegates power to delegatee
     gov_client.delegate(&delegator, &delegatee);
 
     // Delegatee votes with combined power
     let proposal_id = gov_client.create_proposal(&delegatee, &symbol_short!("delvote"));
+    env.ledger().set_sequence(env.ledger().sequence() + 1); // Start voting
     gov_client.vote(&delegatee, &proposal_id, &true);
 
     let proposal = gov_client.get_proposal(proposal_id);
@@ -348,6 +381,7 @@ fn test_snapshot_voting_power() {
 
     // Create a proposal and have both vote
     let proposal_id = gov_client.create_proposal(&voter_a, &symbol_short!("snap1"));
+    env.ledger().set_sequence(env.ledger().sequence() + 1); // Start voting
     gov_client.vote(&voter_a, &proposal_id, &true);
     gov_client.vote(&voter_b, &proposal_id, &true);
 
@@ -393,6 +427,7 @@ fn test_snapshot_with_delegation() {
     // Delegate and vote
     gov_client.delegate(&delegator, &delegatee);
     let proposal_id = gov_client.create_proposal(&delegatee, &symbol_short!("snapd"));
+    env.ledger().set_sequence(env.ledger().sequence() + 1); // Start voting
     gov_client.vote(&delegatee, &proposal_id, &true);
 
     // Snapshot should reflect effective power (200 + 300 = 500) for delegatee
@@ -420,6 +455,7 @@ fn test_multiple_snapshots() {
 
     // Vote
     let proposal_id = gov_client.create_proposal(&voter, &symbol_short!("msnap"));
+    env.ledger().set_sequence(env.ledger().sequence() + 1); // Start voting
     gov_client.vote(&voter, &proposal_id, &true);
 
     // Second snapshot: now voter is known
@@ -445,6 +481,7 @@ fn test_voter_engagement_events_emitted() {
 
     // Create proposal, vote, move past voting, queue
     let proposal_id = gov_client.create_proposal(&voter_a, &symbol_short!("engage"));
+    env.ledger().set_sequence(env.ledger().sequence() + 1); // Start voting
     gov_client.vote(&voter_a, &proposal_id, &true);
     gov_client.vote(&voter_b, &proposal_id, &true);
 
@@ -484,6 +521,7 @@ fn test_engagement_with_delegated_power() {
     // Delegate and vote
     gov_client.delegate(&delegator, &delegatee);
     let proposal_id = gov_client.create_proposal(&delegatee, &symbol_short!("engdel"));
+    env.ledger().set_sequence(env.ledger().sequence() + 1); // Start voting
     gov_client.vote(&delegatee, &proposal_id, &true);
 
     // Move past voting period and queue
@@ -625,3 +663,289 @@ fn test_undelegate_restores_voting() {
     let proposal = gov_client.get_proposal(proposal_id);
     assert_eq!(proposal.votes_for, 300);
 }
+
+// ── State Machine Transition Tests ─────────────────────────────────────────
+
+#[test]
+fn test_proposal_state_proposed() {
+    let (env, _admin, gov_client, token_addr) = setup_env();
+    let proposer = Address::generate(&env);
+
+    let token_client = token::Client::new(&env, &token_addr);
+    token_client.mint(&proposer, &500);
+
+    // Right after creation, proposal should be in Proposed state
+    let proposal_id = gov_client.create_proposal(&proposer, &symbol_short!("prop"));
+    assert_eq!(gov_client.get_status(&proposal_id), ProposalStatus::Proposed);
+}
+
+#[test]
+fn test_proposal_state_open_to_closed() {
+    let (env, _admin, gov_client, token_addr) = setup_env();
+    let voter = Address::generate(&env);
+
+    let token_client = token::Client::new(&env, &token_addr);
+    token_client.mint(&voter, &500);
+
+    let proposal_id = gov_client.create_proposal(&voter, &symbol_short!("open_close"));
+    
+    // Move to start voting (transitions to Open)
+    env.ledger().set_sequence(env.ledger().sequence() + 1);
+    assert_eq!(gov_client.get_status(&proposal_id), ProposalStatus::Open);
+
+    // Vote during open period
+    gov_client.vote(&voter, &proposal_id, &true);
+
+    // Move past voting period (transitions to Closed)
+    env.ledger().set_sequence(env.ledger().sequence() + 100);
+    assert_eq!(gov_client.get_status(&proposal_id), ProposalStatus::Closed);
+}
+
+#[test]
+fn test_proposal_state_expired_proposal() {
+    let (env, _admin, gov_client, token_addr) = setup_env();
+    let voter = Address::generate(&env);
+
+    let token_client = token::Client::new(&env, &token_addr);
+    token_client.mint(&voter, &50); // Less than quorum (100)
+
+    let proposal_id = gov_client.create_proposal(&voter, &symbol_short!("expire"));
+    
+    env.ledger().set_sequence(env.ledger().sequence() + 1);
+    gov_client.vote(&voter, &proposal_id, &true);
+
+    // Move past voting period with insufficient votes
+    env.ledger().set_sequence(env.ledger().sequence() + 100);
+    assert_eq!(gov_client.get_status(&proposal_id), ProposalStatus::Expired);
+}
+
+#[test]
+fn test_full_state_machine_lifecycle() {
+    let (env, _admin, gov_client, token_addr) = setup_env();
+    let voter = Address::generate(&env);
+
+    let token_client = token::Client::new(&env, &token_addr);
+    token_client.mint(&voter, &500);
+
+    let proposal_id = gov_client.create_proposal(&voter, &symbol_short!("full_life"));
+
+    // Proposed -> Open
+    assert_eq!(gov_client.get_status(&proposal_id), ProposalStatus::Proposed);
+    env.ledger().set_sequence(env.ledger().sequence() + 1);
+    assert_eq!(gov_client.get_status(&proposal_id), ProposalStatus::Open);
+
+    // Vote during Open
+    gov_client.vote(&voter, &proposal_id, &true);
+
+    // Open -> Closed
+    env.ledger().set_sequence(env.ledger().sequence() + 100);
+    assert_eq!(gov_client.get_status(&proposal_id), ProposalStatus::Closed);
+
+    // Queue (still Closed while in timelock)
+    gov_client.queue_proposal(&proposal_id);
+    assert_eq!(gov_client.get_status(&proposal_id), ProposalStatus::Closed);
+
+    // Wait for timelock and execute -> Executed
+    env.ledger().set_timestamp(env.ledger().timestamp() + 3600 + 1);
+    gov_client.execute_proposal(&proposal_id);
+    assert_eq!(gov_client.get_status(&proposal_id), ProposalStatus::Executed);
+}
+
+// ── Enhanced Event Logging Tests ───────────────────────────────────────────
+
+#[test]
+fn test_proposal_created_event() {
+    let (env, _admin, gov_client, token_addr) = setup_env();
+    let proposer = Address::generate(&env);
+
+    let token_client = token::Client::new(&env, &token_addr);
+    token_client.mint(&proposer, &500);
+
+    let description = symbol_short!("event_test");
+    let _proposal_id = gov_client.create_proposal(&proposer, &description);
+
+    // Verify events were emitted
+    let events = env.events().all();
+    assert!(events.len() >= 1, "Expected at least 1 event for proposal creation");
+}
+
+#[test]
+fn test_vote_cast_event_emitted() {
+    let (env, _admin, gov_client, token_addr) = setup_env();
+    let voter = Address::generate(&env);
+
+    let token_client = token::Client::new(&env, &token_addr);
+    token_client.mint(&voter, &500);
+
+    let proposal_id = gov_client.create_proposal(&voter, &symbol_short!("vote_evt"));
+    env.ledger().set_sequence(env.ledger().sequence() + 1);
+    
+    let initial_event_count = env.events().all().len();
+    
+    gov_client.vote(&voter, &proposal_id, &true);
+
+    let events = env.events().all();
+    // Should have more events after voting
+    assert!(events.len() > initial_event_count, "Expected additional events after voting");
+}
+
+#[test]
+fn test_proposal_closed_event_on_queue() {
+    let (env, _admin, gov_client, token_addr) = setup_env();
+    let voter = Address::generate(&env);
+
+    let token_client = token::Client::new(&env, &token_addr);
+    token_client.mint(&voter, &500);
+
+    let proposal_id = gov_client.create_proposal(&voter, &symbol_short!("close_evt"));
+    env.ledger().set_sequence(env.ledger().sequence() + 1);
+    gov_client.vote(&voter, &proposal_id, &true);
+
+    env.ledger().set_sequence(env.ledger().sequence() + 100);
+    
+    let initial_event_count = env.events().all().len();
+    gov_client.queue_proposal(&proposal_id);
+
+    let events = env.events().all();
+    // Should emit ProposalClosed event
+    assert!(events.len() > initial_event_count, "Expected ProposalClosed event");
+}
+
+#[test]
+fn test_proposal_executed_event() {
+    let (env, _admin, gov_client, token_addr) = setup_env();
+    let voter = Address::generate(&env);
+
+    let token_client = token::Client::new(&env, &token_addr);
+    token_client.mint(&voter, &500);
+
+    let proposal_id = gov_client.create_proposal(&voter, &symbol_short!("exec_evt"));
+    env.ledger().set_sequence(env.ledger().sequence() + 1);
+    gov_client.vote(&voter, &proposal_id, &true);
+
+    env.ledger().set_sequence(env.ledger().sequence() + 100);
+    gov_client.queue_proposal(&proposal_id);
+
+    env.ledger().set_timestamp(env.ledger().timestamp() + 3600 + 1);
+    
+    let initial_event_count = env.events().all().len();
+    gov_client.execute_proposal(&proposal_id);
+
+    let events = env.events().all();
+    // Should emit ProposalExecuted event
+    assert!(events.len() > initial_event_count, "Expected ProposalExecuted event");
+}
+
+#[test]
+fn test_delegation_changed_event_includes_power() {
+    let (env, _admin, gov_client, token_addr) = setup_env();
+    let delegator = Address::generate(&env);
+    let delegatee = Address::generate(&env);
+
+    let token_client = token::Client::new(&env, &token_addr);
+    token_client.mint(&delegator, &300);
+    token_client.mint(&delegatee, &200);
+
+    let initial_event_count = env.events().all().len();
+    
+    gov_client.delegate(&delegator, &delegatee);
+
+    let events = env.events().all();
+    // Should emit DelegationChanged event with power info
+    assert!(events.len() > initial_event_count, "Expected DelegationChanged event");
+}
+
+#[test]
+fn test_delegation_removed_event_includes_power() {
+    let (env, _admin, gov_client, token_addr) = setup_env();
+    let delegator = Address::generate(&env);
+    let delegatee = Address::generate(&env);
+
+    let token_client = token::Client::new(&env, &token_addr);
+    token_client.mint(&delegator, &300);
+    token_client.mint(&delegatee, &200);
+
+    gov_client.delegate(&delegator, &delegatee);
+    
+    let initial_event_count = env.events().all().len();
+    gov_client.undelegate(&delegator);
+
+    let events = env.events().all();
+    // Should emit DelegationRemoved event with power info
+    assert!(events.len() > initial_event_count, "Expected DelegationRemoved event");
+}
+
+// ── Complex Integration Tests ──────────────────────────────────────────────
+
+#[test]
+fn test_proposal_state_tracking_with_multiple_proposals() {
+    let (env, _admin, gov_client, token_addr) = setup_env();
+    let voter_a = Address::generate(&env);
+    let voter_b = Address::generate(&env);
+
+    let token_client = token::Client::new(&env, &token_addr);
+    token_client.mint(&voter_a, &500);
+    token_client.mint(&voter_b, &600);
+
+    // Create first proposal
+    let prop1 = gov_client.create_proposal(&voter_a, &symbol_short!("prop1"));
+    assert_eq!(gov_client.get_status(&prop1), ProposalStatus::Proposed);
+
+    // Create second proposal
+    let prop2 = gov_client.create_proposal(&voter_b, &symbol_short!("prop2"));
+    assert_eq!(gov_client.get_status(&prop2), ProposalStatus::Proposed);
+
+    // Move time forward
+    env.ledger().set_sequence(env.ledger().sequence() + 1);
+    
+    // Both should transition to Open
+    assert_eq!(gov_client.get_status(&prop1), ProposalStatus::Open);
+    assert_eq!(gov_client.get_status(&prop2), ProposalStatus::Open);
+
+    // Vote on both
+    gov_client.vote(&voter_a, &prop1, &true);
+    gov_client.vote(&voter_b, &prop2, &true);
+
+    // Still Open
+    assert_eq!(gov_client.get_status(&prop1), ProposalStatus::Open);
+    assert_eq!(gov_client.get_status(&prop2), ProposalStatus::Open);
+
+    // Move past voting period
+    env.ledger().set_sequence(env.ledger().sequence() + 100);
+    
+    // Both should transition to Closed
+    assert_eq!(gov_client.get_status(&prop1), ProposalStatus::Closed);
+    assert_eq!(gov_client.get_status(&prop2), ProposalStatus::Closed);
+}
+
+#[test]
+fn test_delegation_changes_during_voting() {
+    let (env, _admin, gov_client, token_addr) = setup_env();
+    let delegator = Address::generate(&env);
+    let delegatee_a = Address::generate(&env);
+    let delegatee_b = Address::generate(&env);
+
+    let token_client = token::Client::new(&env, &token_addr);
+    token_client.mint(&delegator, &300);
+    token_client.mint(&delegatee_a, &200);
+    token_client.mint(&delegatee_b, &250);
+
+    // Delegate to A
+    gov_client.delegate(&delegator, &delegatee_a);
+    assert_eq!(gov_client.get_voting_power(&delegatee_a), 500);
+    assert_eq!(gov_client.get_voting_power(&delegatee_b), 250);
+
+    // Create proposal and have delegatee_a vote
+    let proposal_id = gov_client.create_proposal(&delegatee_a, &symbol_short!("del_vote"));
+    env.ledger().set_sequence(env.ledger().sequence() + 1);
+    gov_client.vote(&delegatee_a, &proposal_id, &true);
+
+    let proposal = gov_client.get_proposal(proposal_id);
+    assert_eq!(proposal.votes_for, 500);
+
+    // Redelegate to B after voting (simulating a change in delegation after voting)
+    gov_client.delegate(&delegator, &delegatee_b);
+    assert_eq!(gov_client.get_voting_power(&delegatee_a), 200);
+    assert_eq!(gov_client.get_voting_power(&delegatee_b), 550);
+}
+

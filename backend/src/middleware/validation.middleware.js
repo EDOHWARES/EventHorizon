@@ -1,4 +1,5 @@
 const Joi = require('joi');
+const ipWhitelistService = require('../services/ipWhitelist.service');
 const {
     validateFilters,
     MAX_FILTERS_PER_TRIGGER,
@@ -26,6 +27,17 @@ const filtersSchema = Joi.array()
         'any.invalid': '{{#message}}',
     });
 
+const cidrSchema = Joi.string().trim().custom((value, helpers) => {
+    try {
+        ipWhitelistService.normalizeCidr(value);
+        return value;
+    } catch (error) {
+        return helpers.error('any.invalid', { message: error.message });
+    }
+}, 'IP or CIDR validation').messages({
+    'any.invalid': '{{#message}}',
+});
+
 const validationSchemas = {
     triggerCreate: Joi.object({
         contractId: Joi.string().trim().required(),
@@ -35,6 +47,18 @@ const validationSchemas = {
         isActive: Joi.boolean().default(true),
         lastPolledLedger: Joi.number().integer().min(0).default(0),
         filters: filtersSchema.default([]),
+        authConfig: Joi.object({
+            type: Joi.string().valid('none', 'oauth2').default('none'),
+            oauth2: Joi.object({
+                tokenUrl: Joi.string().uri().required(),
+                clientId: Joi.string().required(),
+                clientSecret: Joi.string().required(),
+            }).when('type', {
+                is: 'oauth2',
+                then: Joi.required(),
+                otherwise: Joi.forbidden()
+            })
+        }).optional(),
     }),
     authCredentials: Joi.object({
         email: Joi.string().trim().email().required(),
@@ -65,6 +89,16 @@ const validationSchemas = {
             'manage_users', 'manage_organization', 'view_audit_logs'
         )).required(),
     }),
+    ipWhitelistEntry: Joi.object({
+        cidr: cidrSchema.required(),
+        label: Joi.string().trim().allow('').default(''),
+        enabled: Joi.boolean().default(true),
+    }),
+    ipWhitelistEntryUpdate: Joi.object({
+        cidr: cidrSchema,
+        label: Joi.string().trim().allow(''),
+        enabled: Joi.boolean(),
+    }).min(1),
 };
 
 const mapValidationErrors = (details) =>
