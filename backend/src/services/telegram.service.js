@@ -1,4 +1,5 @@
 const axios = require('axios');
+const breakers = require('./circuitBreaker');
 
 /**
  * Service to handle Telegram Bot notifications
@@ -31,10 +32,22 @@ class TelegramService {
                     timeout: options.timeout || 30000,
                     ...options,
                 }
+            const response = await breakers.fire(
+                'telegram',
+                (postUrl, body) => axios.post(postUrl, body),
+                [url, {
+                    chat_id: chatId,
+                    text: text,
+                    parse_mode: 'MarkdownV2'
+                }]
             );
 
             return response.data;
         } catch (error) {
+            if (error.code === 'CIRCUIT_OPEN') {
+                console.error('Telegram circuit breaker OPEN — fast-failing.');
+                return { success: false, status: 503, message: 'circuit_open' };
+            }
             // Graceful error handling for common Telegram API issues
             if (error.response) {
                 const { status, data } = error.response;

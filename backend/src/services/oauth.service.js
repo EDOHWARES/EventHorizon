@@ -2,6 +2,7 @@ const axios = require('axios');
 const Credential = require('../models/credential.model');
 const { encrypt, decrypt } = require('../utils/encryption');
 const logger = require('../config/logger');
+const breakers = require('./circuitBreaker');
 
 // Configuration for supported providers
 const PROVIDERS = {
@@ -31,14 +32,20 @@ async function refreshAccessToken(credential) {
     try {
         const plainRefreshToken = decrypt(credential.refreshToken);
         
-        const response = await axios.post(config.tokenUrl, new URLSearchParams({
-            client_id: config.clientId,
-            client_secret: config.clientSecret,
-            grant_type: 'refresh_token',
-            refresh_token: plainRefreshToken
-        }).toString(), {
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-        });
+        const response = await breakers.fire(
+            `oauth:${credential.provider}`,
+            (tokenUrl, body, cfg) => axios.post(tokenUrl, body, cfg),
+            [
+                config.tokenUrl,
+                new URLSearchParams({
+                    client_id: config.clientId,
+                    client_secret: config.clientSecret,
+                    grant_type: 'refresh_token',
+                    refresh_token: plainRefreshToken
+                }).toString(),
+                { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+            ]
+        );
 
         const { access_token, refresh_token, expires_in } = response.data;
         
