@@ -379,6 +379,8 @@ function createWorker() {
             error: err.message,
             attemptsRemaining: job ? job.opts.attempts - job.attemptsMade : 0,
         });
+        // Fire DLQ threshold alert (non-blocking)
+        require('../services/dlq.service').checkAndAlert().catch(() => {});
     });
 
     worker.on('error', (err) => {

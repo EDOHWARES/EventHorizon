@@ -27,6 +27,8 @@ app.use('/api/invitations', require('./routes/invitation.routes'));
 app.use('/api/admin/ip-whitelist', require('./routes/ipWhitelist.routes'));
 // app.use('/api/team', require('./routes/team.routes'));
 app.use('/api/queue', require('./routes/queue.routes'));
+app.use('/api/dlq', require('./routes/dlq.routes'));
+app.use('/api/dlq', require('./routes/dlq.routes'));
 app.use('/api/discovery', require('./routes/discovery.routes'));
 app.use('/api/escrow', require('./routes/escrow.routes'));
 /**
