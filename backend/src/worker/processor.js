@@ -1,5 +1,7 @@
 const { Worker } = require('bullmq');
 const Redis = require('ioredis');
+const { executeSingleAction } = require('../services/actionExecutor.service');
+const { executeWorkflow } = require('../services/workflow.service');
 const axios = require('axios');
 const { performance } = require('perf_hooks');
 const { sendEventNotification } = require('../services/email.service');
@@ -62,6 +64,9 @@ const connection = new Redis(connectionConfig);
  * Execute the action based on the trigger type
  */
 async function executeAction(job) {
+    const { trigger, eventPayload, eventPayloads, isBatch } = job.data;
+    const { contractId, eventName } = trigger;
+    const actionType = trigger.steps?.length > 0 ? 'workflow' : trigger.actionType;
     let { trigger, eventPayload, eventPayloads, isBatch } = job.data;
     const { actionType, actionUrl, contractId, eventName } = trigger;
 
@@ -159,6 +164,11 @@ async function executeAction(job) {
     }
 
     if (isBatch) {
+        return await executeBatchAction(trigger, eventPayloads, { runIdPrefix: job.id });
+    }
+
+    if (trigger.steps?.length > 0) {
+        return await executeWorkflow(trigger, eventPayload, { runId: String(job.id) });
         result = await executeBatchAction(trigger, eventPayloads);
     } else {
         result = await executeSingleAction(trigger, eventPayload);
@@ -275,13 +285,16 @@ async function executeSingleAction(trigger, eventPayload) {
         default:
             throw new Error(`Unsupported action type: ${actionType}`);
     }
+
+    return await executeSingleAction(trigger, eventPayload);
 }
 
 /**
  * Execute a batch action with error handling for individual events
  */
-async function executeBatchAction(trigger, eventPayloads) {
-    const { actionType, actionUrl, contractId, eventName, batchingConfig } = trigger;
+async function executeBatchAction(trigger, eventPayloads, options = {}) {
+    const { contractId, eventName, batchingConfig } = trigger;
+    const actionType = trigger.steps?.length > 0 ? 'workflow' : trigger.actionType;
     const continueOnError = batchingConfig?.continueOnError ?? true;
 
     let webhookHeaders = {};
@@ -319,6 +332,22 @@ async function executeBatchAction(trigger, eventPayloads) {
         const eventPayload = eventPayloads[i];
 
         try {
+            if (trigger.steps?.length > 0) {
+                await executeWorkflow(trigger, eventPayload, {
+                    runId: options.runIdPrefix ? `${options.runIdPrefix}:${i}` : undefined,
+                    executeStep: options.executeStep,
+                });
+            } else {
+                const webhookPayload = actionType === 'webhook' ? {
+                    contractId,
+                    eventName,
+                    payload: eventPayload,
+                    batchIndex: i,
+                    batchSize: eventPayloads.length,
+                    batchPayloads: eventPayloads,
+                } : undefined;
+
+                await executeSingleAction(trigger, eventPayload, { webhookPayload });
             switch (actionType) {
                 case 'email': {
                     const { sendEventNotification } = require('../services/email.service');
@@ -650,6 +679,7 @@ module.exports = {
     createWorker,
     connection,
     executeAction,
+    executeBatchAction,
     executeSingleAction,
     executeBatchAction,
     executeWebhookBatchAction

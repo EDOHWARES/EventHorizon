@@ -30,6 +30,13 @@ const getActionQueue = (network = 'testnet') => {
 const enqueueAction = async (trigger, eventPayload) => {
     const network = trigger.network || 'testnet';
     const queue = getActionQueue(network);
+    const jobName = trigger.steps?.length > 0
+        ? `workflow-${trigger._id}`
+        : `${trigger.actionType}-${trigger._id}`;
+    
+    await queue.add(
+        jobName,
+        { trigger, eventPayload },
 
     const _traceContext = injectContextIntoCarrier({});
 
@@ -72,4 +79,5 @@ const cleanQueue = async () => {
     }
 };
 
+module.exports = { getActionQueue, enqueueAction, getQueueStats, cleanQueue, queues };
 module.exports = { getActionQueue, enqueueAction, enqueueBatchAction, getQueueStats, cleanQueue, queues };

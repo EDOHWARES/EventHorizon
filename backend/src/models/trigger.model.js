@@ -29,6 +29,44 @@ const filterSchema = new mongoose.Schema({
     },
 }, { _id: false });
 
+const WORKFLOW_ACTION_TYPES = ['webhook', 'discord', 'email', 'telegram'];
+const WORKFLOW_RUN_IF = ['success', 'failure', 'always'];
+const WORKFLOW_STEP_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+
+const workflowStepSchema = new mongoose.Schema({
+    id: {
+        type: String,
+        required: true,
+        trim: true,
+        match: WORKFLOW_STEP_ID_PATTERN,
+    },
+    name: {
+        type: String,
+        trim: true,
+    },
+    actionType: {
+        type: String,
+        enum: WORKFLOW_ACTION_TYPES,
+        required: true,
+    },
+    actionUrl: {
+        type: String,
+        trim: true,
+    },
+    webhookSecret: {
+        type: String,
+    },
+    config: {
+        type: mongoose.Schema.Types.Mixed,
+        default: {},
+    },
+    runIf: {
+        type: String,
+        enum: WORKFLOW_RUN_IF,
+        default: 'success',
+    },
+}, { _id: false });
+
 const triggerSchema = new mongoose.Schema({
     organization: {
         type: mongoose.Schema.Types.ObjectId,
@@ -57,7 +95,9 @@ const triggerSchema = new mongoose.Schema({
     },
     actionUrl: {
         type: String,
-        required: true
+        required: function requiredActionUrl() {
+            return !this.steps || this.steps.length === 0;
+        }
     },
     webhookSecret: {
         type: String,
@@ -147,6 +187,15 @@ const triggerSchema = new mongoose.Schema({
         type: [filterSchema],
         default: [],
     },
+    steps: {
+        type: [workflowStepSchema],
+        default: [],
+    },
+    workflowConfig: {
+        continueOnError: {
+            type: Boolean,
+            default: false,
+        },
     // Custom headers for webhook actions
     customHeaders: {
         type: [{
@@ -259,4 +308,7 @@ const Trigger = mongoose.model('Trigger', triggerSchema);
 
 module.exports = Trigger;
 module.exports.FILTER_OPERATORS = FILTER_OPERATORS;
+module.exports.WORKFLOW_ACTION_TYPES = WORKFLOW_ACTION_TYPES;
+module.exports.WORKFLOW_RUN_IF = WORKFLOW_RUN_IF;
+module.exports.WORKFLOW_STEP_ID_PATTERN = WORKFLOW_STEP_ID_PATTERN;
 module.exports.MAX_CONSECUTIVE_FAILURES = MAX_CONSECUTIVE_FAILURES;

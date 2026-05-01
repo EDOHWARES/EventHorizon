@@ -35,6 +35,7 @@ const router = express.Router();
  *             - webhook
  *             - discord
  *             - email
+ *             - telegram
  *           default: webhook
  *           example: webhook
  *         actionUrl:
@@ -42,6 +43,13 @@ const router = express.Router();
  *           format: uri
  *           description: Destination URL or integration endpoint for the action.
  *           example: https://example.com/webhooks/event-horizon
+ *         steps:
+ *           type: array
+ *           description: Ordered workflow steps. When present, top-level actionUrl is not used.
+ *           items:
+ *             $ref: '#/components/schemas/WorkflowStep'
+ *         workflowConfig:
+ *           $ref: '#/components/schemas/WorkflowConfig'
  *         isActive:
  *           type: boolean
  *           default: true
@@ -92,16 +100,70 @@ const router = express.Router();
  *             - webhook
  *             - discord
  *             - email
+ *             - telegram
  *           default: webhook
  *           example: webhook
  *         actionUrl:
  *           type: string
  *           format: uri
  *           example: https://example.com/webhooks/event-horizon
+ *         steps:
+ *           type: array
+ *           description: Ordered workflow steps. Omit actionUrl when steps are provided.
+ *           items:
+ *             $ref: '#/components/schemas/WorkflowStep'
+ *         workflowConfig:
+ *           $ref: '#/components/schemas/WorkflowConfig'
  *         isActive:
  *           type: boolean
  *           default: true
  *           example: true
+ *     WorkflowStep:
+ *       type: object
+ *       required:
+ *         - id
+ *         - actionType
+ *       properties:
+ *         id:
+ *           type: string
+ *           pattern: '^[A-Za-z][A-Za-z0-9_-]{0,63}$'
+ *           example: notifyWebhook
+ *         name:
+ *           type: string
+ *           example: Notify partner webhook
+ *         actionType:
+ *           type: string
+ *           enum:
+ *             - webhook
+ *             - discord
+ *             - email
+ *             - telegram
+ *           example: webhook
+ *         actionUrl:
+ *           type: string
+ *           format: uri
+ *           example: https://example.com/workflow-step
+ *         webhookSecret:
+ *           type: string
+ *           description: Optional per-step webhook signing secret.
+ *         config:
+ *           type: object
+ *           additionalProperties: true
+ *           description: Action-specific settings. String values may reference workflow context templates.
+ *         runIf:
+ *           type: string
+ *           enum:
+ *             - success
+ *             - failure
+ *             - always
+ *           default: success
+ *     WorkflowConfig:
+ *       type: object
+ *       properties:
+ *         continueOnError:
+ *           type: boolean
+ *           default: false
+ *           description: Return a failed workflow result instead of throwing after failed steps.
  *         authConfig:
  *           type: object
  *           properties:

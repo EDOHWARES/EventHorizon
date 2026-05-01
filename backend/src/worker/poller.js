@@ -120,6 +120,11 @@ try {
     });
 
     // Fallback: direct execution with full action routing
+    const { executeSingleAction } = require('../services/actionExecutor.service');
+    const { executeWorkflow } = require('../services/workflow.service');
+
+    enqueueAction = async function executeTriggerActionDirect(trigger, eventPayload) {
+        const { actionType, contractId, eventName } = trigger;
     const axios = require('axios');
     const { sendEventNotification } = require('../services/email.service');
     const { sendDiscordNotification } = require('../services/discord.service');
@@ -137,6 +142,8 @@ try {
             eventName,
         });
 
+        if (trigger.steps?.length > 0) {
+            return await executeWorkflow(trigger, eventPayload);
         try {
             let result;
         switch (actionType) {
@@ -239,6 +246,8 @@ try {
             }
             throw err;
         }
+
+        return await executeSingleAction(trigger, eventPayload);
     };
 }
 

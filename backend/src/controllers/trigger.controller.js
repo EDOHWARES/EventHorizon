@@ -5,18 +5,36 @@ const asyncHandler = require('../utils/asyncHandler');
 const ipWhitelistService = require('../services/ipWhitelist.service');
 
 async function validateWebhookDestinationIfNeeded(body, organizationId, currentTrigger = null) {
+    const warnings = [];
+    const steps = body.steps ?? currentTrigger?.steps ?? [];
+
+    if (Array.isArray(steps) && steps.length > 0) {
+        for (const step of steps) {
+            if (step.actionType !== 'webhook' || !step.actionUrl) {
+                continue;
+            }
+
+            const result = await ipWhitelistService.validateUrl(step.actionUrl, organizationId, {
+                allowDnsFailure: true,
+            });
+            warnings.push(...(result.warnings || []).map((warning) => `step ${step.id}: ${warning}`));
+        }
+        return warnings;
+    }
+
     const actionType = body.actionType ?? currentTrigger?.actionType ?? 'webhook';
     const actionUrl = body.actionUrl ?? currentTrigger?.actionUrl;
 
     if (actionType !== 'webhook' || !actionUrl) {
-        return [];
+        return warnings;
     }
 
     const result = await ipWhitelistService.validateUrl(actionUrl, organizationId, {
         allowDnsFailure: true,
     });
 
-    return result.warnings || [];
+    warnings.push(...(result.warnings || []));
+    return warnings;
 }
 
 exports.createTrigger = asyncHandler(async (req, res) => {
@@ -135,9 +153,21 @@ exports.updateTrigger = asyncHandler(async (req, res) => {
         existingTrigger
     );
 
+    const updatePayload = { ...req.body };
+    const hasWorkflowSteps = Array.isArray(updatePayload.steps) && updatePayload.steps.length > 0;
+    if (hasWorkflowSteps) {
+        delete updatePayload.actionUrl;
+    }
+    const updateOperation = hasWorkflowSteps
+        ? {
+            $set: updatePayload,
+            $unset: { actionUrl: '' },
+        }
+        : updatePayload;
+
     const trigger = await Trigger.findOneAndUpdate(
         { _id: req.params.id, organization: req.user.organization._id },
-        req.body,
+        updateOperation,
         { new: true, runValidators: true }
     );
 
