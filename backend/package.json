@@ -12,6 +12,9 @@
     "test:actions:integration": "node --test __tests__/action.integration.test.js",
     "migrate:audit": "node scripts/migrate-audit.js"
     "migrate:audit": "node scripts/migrate-audit.js",
+    "timescale:setup": "node scripts/setup-timescale.js",
+    "timescale:migrate": "node scripts/migrate-mongo-to-timescale.js",
+    "timescale:migrate:dry": "node scripts/migrate-mongo-to-timescale.js --dry-run",
     "start:mtls": "node src/mtls-server.js"
   },
   "dependencies": {
@@ -39,6 +42,7 @@
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^8.0.0",
     "node-vault": "^0.10.2",
+    "pg": "^8.11.3",
     "openapi-to-postmanv2": "^6.0.1",
     "opossum": "^9.0.0",
     "swagger-jsdoc": "^6.2.8",

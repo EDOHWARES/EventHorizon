@@ -33,6 +33,17 @@ const { withSpan, runWithExtractedContext } = require('../utils/tracing');
 
 const { createRedisClient } = require('../config/redis');
 
+// Execution log persistence — optional; silently disabled when TimescaleDB is not configured
+let executionLogService = null;
+try {
+    executionLogService = require('../services/executionLog.service');
+} catch (_) {
+    // service unavailable — logging will be skipped
+}
+
+const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
+const REDIS_PORT = process.env.REDIS_PORT || 6379;
+const REDIS_PASSWORD = process.env.REDIS_PASSWORD || undefined;
 const WORKER_CONCURRENCY = Number(process.env.WORKER_CONCURRENCY || 5);
 
 const connection = createRedisClient({ lazyConnect: true, maxRetriesPerRequest: null });
@@ -55,6 +66,7 @@ async function executeAction(job) {
     const { actionType, actionUrl, contractId, eventName } = trigger;
 
     const batchSize = isBatch ? eventPayloads.length : 1;
+    const startTime = Date.now();
 
     logger.info('Processing action job', {
         jobId: job.id,
@@ -66,6 +78,50 @@ async function executeAction(job) {
         attempt: job.attemptsMade + 1,
     });
 
+    try {
+        let result;
+        if (isBatch) {
+            result = await executeBatchAction(trigger, eventPayloads);
+        } else {
+            result = await executeSingleAction(trigger, eventPayload);
+        }
+
+        // Log success to TimescaleDB
+        const durationMs = Date.now() - startTime;
+        if (executionLogService) {
+            if (isBatch) {
+                executionLogService.logBatchExecution(trigger, result, {
+                    durationMs,
+                    attemptNumber: job.attemptsMade + 1,
+                    ledgerSequence: eventPayload?.ledger || eventPayloads?.[0]?.ledger,
+                    source: 'queue',
+                }).catch(() => {}); // fire-and-forget
+            } else {
+                executionLogService.logSuccess(trigger, {
+                    durationMs,
+                    attemptNumber: job.attemptsMade + 1,
+                    ledgerSequence: eventPayload?.ledger,
+                    payloadSnapshot: eventPayload,
+                    source: 'queue',
+                }).catch(() => {});
+            }
+        }
+
+        return result;
+    } catch (error) {
+        // Log failure to TimescaleDB
+        const durationMs = Date.now() - startTime;
+        if (executionLogService) {
+            executionLogService.logFailure(trigger, error, {
+                durationMs,
+                attemptNumber: job.attemptsMade + 1,
+                ledgerSequence: eventPayload?.ledger || eventPayloads?.[0]?.ledger,
+                payloadSnapshot: eventPayload,
+                source: 'queue',
+            }).catch(() => {});
+        }
+
+        throw error;
     // Check kill switch
     const isAllowed = await killSwitchService.isActionAllowed(trigger.organization.toString(), actionType);
     if (!isAllowed) {
