@@ -1,0 +1,135 @@
+{
+  "title": "EventHorizon k6 Load Tests",
+  "uid": "eventhorizon-k6",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "HTTP Request Rate (req/s)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "datasource": "InfluxDB",
+          "query": "SELECT non_negative_derivative(mean(\"value\"), 1s) FROM \"http_reqs\" WHERE $timeFilter GROUP BY time($__interval) fill(0)",
+          "alias": "req/s"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "HTTP Request Duration (ms)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "datasource": "InfluxDB",
+          "query": "SELECT percentile(\"value\", 95) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+          "alias": "p95"
+        },
+        {
+          "datasource": "InfluxDB",
+          "query": "SELECT percentile(\"value\", 99) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+          "alias": "p99"
+        },
+        {
+          "datasource": "InfluxDB",
+          "query": "SELECT mean(\"value\") FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+          "alias": "avg"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Active Virtual Users",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "datasource": "InfluxDB",
+          "query": "SELECT last(\"value\") FROM \"vus\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+          "alias": "VUs"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "HTTP Error Rate (%)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "datasource": "InfluxDB",
+          "query": "SELECT mean(\"value\") * 100 FROM \"http_req_failed\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+          "alias": "error %"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red",   "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Auth Duration p95 (ms)",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 16, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "datasource": "InfluxDB",
+          "query": "SELECT percentile(\"value\", 95) FROM \"auth_duration\" WHERE $timeFilter",
+          "alias": "auth p95"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Trigger Duration p95 (ms)",
+      "type": "stat",
+      "gridPos": { "x": 6, "y": 16, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "datasource": "InfluxDB",
+          "query": "SELECT percentile(\"value\", 95) FROM \"trigger_duration\" WHERE $timeFilter",
+          "alias": "trigger p95"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Queue Duration p95 (ms)",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 16, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "datasource": "InfluxDB",
+          "query": "SELECT percentile(\"value\", 95) FROM \"queue_duration\" WHERE $timeFilter",
+          "alias": "queue p95"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Triggers Created (total)",
+      "type": "stat",
+      "gridPos": { "x": 18, "y": 16, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "datasource": "InfluxDB",
+          "query": "SELECT last(\"value\") FROM \"triggers_created\" WHERE $timeFilter",
+          "alias": "created"
+        }
+      ]
+    }
+  ]
+}
