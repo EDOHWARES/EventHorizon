@@ -103,6 +103,15 @@ mongoose
                 logger.error('Data retention job failed', { error: error.message });
             });
         }, 24 * 60 * 60 * 1000); // Run daily
+        
+        // Start Health Check Worker
+        try {
+            const healthWorker = require('./worker/health.worker');
+            healthWorker.start();
+            logger.info('Health Check worker started');
+        } catch (error) {
+            logger.error('Failed to start Health Check worker', { error: error.message });
+        }
 
         app.listen(PORT, () => {
             logger.info('Server started successfully', {

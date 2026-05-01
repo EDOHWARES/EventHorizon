@@ -1,4 +1,4 @@
-const { rpc, xdr } = require('@stellar/stellar-sdk');
+const { rpc, xdr, scValToNative } = require('@stellar/stellar-sdk');
 const Trigger = require('../models/trigger.model');
 const batchService = require('../services/batch.service');
 const correlationService = require('../services/correlation.service');
@@ -11,6 +11,45 @@ const RPC_URL = process.env.SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.
 const server = new rpc.Server(RPC_URL, {
     timeout: parseInt(process.env.RPC_TIMEOUT_MS || '10000', 10),
 });
+
+/**
+ * Decodes a Soroban event into a more usable format.
+ * Extracts the event name from the first topic.
+ */
+function decodeEvent(rawEvent) {
+    const event = { ...rawEvent };
+    
+    // If topics are present, the first topic is usually the event name
+    if (event.topic && Array.isArray(event.topic) && event.topic.length > 0) {
+        try {
+            // Decode the first topic (event name)
+            // Note: The RPC returns Base64 XDR by default
+            const topicXdr = xdr.ScVal.fromXDR(event.topic[0], 'base64');
+            const nativeTopic = scValToNative(topicXdr);
+            
+            if (typeof nativeTopic === 'string') {
+                event.eventName = nativeTopic;
+            } else if (typeof nativeTopic === 'object' && nativeTopic !== null) {
+                // Handle cases where the name might be a symbol or similar
+                event.eventName = nativeTopic.toString();
+            }
+        } catch (e) {
+            logger.debug('Failed to decode event topic as name', { error: e.message });
+        }
+    }
+
+    // Decode the value if it's in XDR
+    if (event.value && event.value.xdr) {
+        try {
+            const valueXdr = xdr.ScVal.fromXDR(event.value.xdr, 'base64');
+            event.payload = scValToNative(valueXdr);
+        } catch (e) {
+            logger.debug('Failed to decode event value', { error: e.message });
+        }
+    }
+
+    return event;
+}
 
 // --- Configuration ---
 const MAX_LEDGERS_PER_POLL = parseInt(process.env.MAX_LEDGERS_PER_POLL || '10000', 10);
@@ -260,8 +299,10 @@ async function pollEventsImpl() {
                     }));
 
                     if (response && response.events && response.events.length > 0) {
-                        for (const event of response.events) {
-                            if (event.ledger > endLedger) break;
+                        for (let rawEvent of response.events) {
+                            if (rawEvent.ledger > endLedger) break;
+
+                            const event = decodeEvent(rawEvent);
 
                             for (const trigger of contractTriggers) {
                                 try {
