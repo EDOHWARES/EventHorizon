@@ -50,6 +50,7 @@ members = [
     "amm_pool_v2",
     "delegator_registry",
     "access_whitelist",
+    "zk_event_filter",
     "parameter_registry",
 ]
 
