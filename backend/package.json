@@ -42,7 +42,8 @@
     "openapi-to-postmanv2": "^6.0.1",
     "opossum": "^9.0.0",
     "swagger-jsdoc": "^6.2.8",
-    "swagger-ui-express": "^5.0.1"
+    "swagger-ui-express": "^5.0.1",
+    "xstate": "^5.31.0"
   },
   "devDependencies": {
     "nock": "^14.0.13",
