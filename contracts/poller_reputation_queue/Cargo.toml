@@ -1,5 +1,5 @@
 [package]
-name = "cross_chain_handler"
+name = "poller_reputation_queue"
 version = "0.1.0"
 edition = "2021"
 
