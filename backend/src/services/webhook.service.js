@@ -1,6 +1,7 @@
 const axios = require('axios');
 const crypto = require('crypto');
 const logger = require('../config/logger');
+const { buildHeaders } = require('../utils/headerBuilder');
 const breakers = require('./circuitBreaker');
 const ipWhitelistService = require('./ipWhitelist.service');
 
@@ -50,6 +51,12 @@ class WebhookService {
             'X-EventHorizon-Timestamp': timestamp,
             ...optionHeaders
         };
+
+        // Add custom headers if provided
+        if (options.customHeaders && Array.isArray(options.customHeaders)) {
+            const customHeaders = buildHeaders(options.customHeaders, payload.payload || payload);
+            Object.assign(headers, customHeaders);
+        }
 
         logger.info('Sending signed webhook', {
             url,

@@ -127,6 +127,9 @@ async function executeSingleAction(trigger, eventPayload) {
                 actionUrl,
                 payload,
                 trigger.webhookSecret,
+                {
+                    customHeaders: trigger.customHeaders
+                },
                 { organizationId: trigger.organization }
             );
         }
@@ -246,6 +249,9 @@ async function executeBatchAction(trigger, eventPayloads) {
                         actionUrl,
                         payload,
                         trigger.webhookSecret,
+                        {
+                            customHeaders: trigger.customHeaders
+                        },
                         { organizationId: trigger.organization }
                     );
                     break;
