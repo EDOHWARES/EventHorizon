@@ -1,6 +1,13 @@
 const { Worker } = require('bullmq');
 const Redis = require('ioredis');
 const axios = require('axios');
+const { performance } = require('perf_hooks');
+const { sendEventNotification } = require('../services/email.service');
+const { sendDiscordNotification } = require('../services/discord.service');
+const telegramService = require('../services/telegram.service');
+const logger = require('../config/logger');
+const pubsub = require('../graphql/pubsub');
+const { transformPayload } = require('./wasmTransformer');
 let sendEventNotification;
 try {
     sendEventNotification = require('../services/email.service').sendEventNotification;
@@ -41,7 +48,7 @@ const connection = new Redis(connectionConfig);
  * Execute the action based on the trigger type
  */
 async function executeAction(job) {
-    const { trigger, eventPayload, eventPayloads, isBatch } = job.data;
+    let { trigger, eventPayload, eventPayloads, isBatch } = job.data;
     const { actionType, actionUrl, contractId, eventName } = trigger;
 
     const batchSize = isBatch ? eventPayloads.length : 1;
@@ -55,6 +62,32 @@ async function executeAction(job) {
         batchSize,
         attempt: job.attemptsMade + 1,
     });
+
+    // Apply Custom WebAssembly Payload Transformation if configured
+    if (trigger.transformerConfig && trigger.transformerConfig.wasmBase64) {
+        const start = performance.now();
+        try {
+            if (isBatch) {
+                for (let i = 0; i < eventPayloads.length; i++) {
+                    eventPayloads[i] = await transformPayload(trigger.transformerConfig.wasmBase64, eventPayloads[i], trigger.transformerConfig.timeoutMs);
+                }
+            } else {
+                eventPayload = await transformPayload(trigger.transformerConfig.wasmBase64, eventPayload, trigger.transformerConfig.timeoutMs);
+            }
+            const duration = performance.now() - start;
+            logger.info('WASM payload transformation successful', {
+                jobId: job.id,
+                durationMs: duration.toFixed(2),
+                isBatch,
+                batchSize
+            });
+        } catch (error) {
+            logger.error('WASM payload transformation failed', { jobId: job.id, error: error.message });
+            if (!trigger.transformerConfig.continueOnError) {
+                throw new Error(`WASM Transformation failed: ${error.message}`);
+            }
+        }
+    }
 
     if (isBatch) {
         return await executeBatchAction(trigger, eventPayloads);
@@ -120,6 +153,11 @@ async function executeSingleAction(trigger, eventPayload) {
                 throw new Error('Missing actionUrl for webhook trigger');
             }
 
+            return await axios.post(actionUrl, {
+                contractId,
+                eventName,
+                payload: eventPayload,
+            });
             const headers = {};
             if (trigger.authConfig?.type === 'oauth2') {
                 const token = await getAccessToken(trigger);
@@ -251,13 +289,14 @@ async function executeBatchAction(trigger, eventPayloads) {
                         throw new Error('Missing actionUrl for webhook trigger');
                     }
 
-                    const payload = {
+                    await axios.post(actionUrl, {
                         contractId,
                         eventName,
                         payload: eventPayload,
                         batchIndex: i,
                         batchSize: eventPayloads.length,
                         batchPayloads: eventPayloads, // Send the full batch for webhooks
+                    });
                     }, { headers: webhookHeaders });
                     };
 
@@ -443,6 +482,19 @@ function createWorker() {
             error: err.message,
             attemptsRemaining: job ? job.opts.attempts - job.attemptsMade : 0,
         });
+            
+            if (job) {
+                pubsub.publish('EXECUTION_LOG', {
+                    executionLog: {
+                        jobId: job.id,
+                        triggerId: String(job.data.trigger._id),
+                        actionType: job.data.trigger.actionType,
+                        status: 'FAILED',
+                        error: err.message,
+                        timestamp: new Date().toISOString()
+                    }
+                });
+            }
         // Fire DLQ threshold alert (non-blocking)
         require('../services/dlq.service').checkAndAlert().catch(() => {});
     });
