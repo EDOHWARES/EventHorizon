@@ -2,6 +2,12 @@
 resolver = "2"
 members = [
     "airdrop",
+    "boilerplate",
+    "burnable_token",
+    "gas_estimator",
+    "token_vesting",
+    "staking",
+    "escrow",
     "amm_pool",
     "boilerplate",
     "bonding_curve",
