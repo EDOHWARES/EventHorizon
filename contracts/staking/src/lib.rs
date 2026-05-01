@@ -17,9 +17,10 @@ pub enum DataKey {
     RewardToken,
     RewardRate,     // Rewards per token per second (scaled)
     LockUpPeriod,   // Seconds tokens must be locked to avoid penalty
-    PenaltyRate,    // Percentage of stake penalized for early exit (0-100)
+    PenaltyRate,    // Max penalty in bps (e.g., 5000 for 50%)
     TotalStaked,
     Stake(Address),
+    EmergencyMode,
 }
 
 const SCALAR: i128 = 1_000_000; // Used to scale reward rates for more precision
@@ -42,8 +43,8 @@ impl StakingContract {
         if env.storage().instance().has(&DataKey::Admin) {
             panic!("Already initialized");
         }
-        if penalty_rate < 0 || penalty_rate > 100 {
-            panic!("Penalty rate must be between 0 and 100");
+        if penalty_rate < 0 || penalty_rate > 10000 {
+            panic!("Penalty rate must be between 0 and 10000");
         }
 
         env.storage().instance().set(&DataKey::Admin, &admin);
@@ -53,6 +54,15 @@ impl StakingContract {
         env.storage().instance().set(&DataKey::LockUpPeriod, &lock_up_period);
         env.storage().instance().set(&DataKey::PenaltyRate, &penalty_rate);
         env.storage().instance().set(&DataKey::TotalStaked, &0i128);
+        env.storage().instance().set(&DataKey::EmergencyMode, &false);
+    }
+
+    /// Admin toggles emergency mode to allow bypassing penalties
+    pub fn set_emergency_mode(env: Env, admin: Address, enabled: bool) {
+        admin.require_auth();
+        let stored_admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        if admin != stored_admin { panic!("Not admin"); }
+        env.storage().instance().set(&DataKey::EmergencyMode, &enabled);
     }
 
     /// Deposits tokens into the staking pool.
@@ -95,7 +105,7 @@ impl StakingContract {
         env.storage().instance().set(&DataKey::TotalStaked, &(total + amount));
 
         env.events().publish(
-            (Symbol::new(&env, "stake"), user),
+            (Symbol::new(&env, "Staked"), user),
             amount
         );
     }
@@ -121,15 +131,19 @@ impl StakingContract {
 
         // 2. Check for early withdrawal penalty
         let lock_period: u64 = env.storage().instance().get(&DataKey::LockUpPeriod).unwrap_or(0);
+        let emergency_mode: bool = env.storage().instance().get(&DataKey::EmergencyMode).unwrap_or(false);
         let mut final_amount = stake_info.amount;
         
-        if now < stake_info.start_ts + lock_period {
-            let penalty_rate: i128 = env.storage().instance().get(&DataKey::PenaltyRate).unwrap_or(0);
-            let penalty = (stake_info.amount * penalty_rate) / 100;
+        if now < stake_info.start_ts + lock_period && !emergency_mode {
+            let penalty_rate_bps: i128 = env.storage().instance().get(&DataKey::PenaltyRate).unwrap_or(0);
+            let elapsed = now - stake_info.start_ts;
+            let penalty = Self::calculate_exponential_penalty(stake_info.amount, penalty_rate_bps, elapsed, lock_period);
             final_amount -= penalty;
             
-            log!(&env, "Penalty applied for early unstaking", penalty);
-            env.events().publish((Symbol::new(&env, "penalty"), user.clone()), penalty);
+            if penalty > 0 {
+                log!(&env, "Penalty applied for early unstaking", penalty);
+                env.events().publish((Symbol::new(&env, "PenaltyApplied"), user.clone()), penalty);
+            }
         }
 
         // 3. Transfer remaining principal back
@@ -143,7 +157,39 @@ impl StakingContract {
         env.storage().persistent().remove(&DataKey::Stake(user.clone()));
 
         env.events().publish(
-            (Symbol::new(&env, "unstake"), user),
+            (Symbol::new(&env, "Unstaked"), user),
+            final_amount
+        );
+
+        final_amount
+    }
+
+    /// Emergency withdrawal: withdraws staked tokens without claiming rewards. Bypasses penalty.
+    #[allow(deprecated)]
+    pub fn emergency_withdraw(env: Env, user: Address) -> i128 {
+        user.require_auth();
+        
+        let stake_info: StakeInfo = env.storage().persistent()
+            .get(&DataKey::Stake(user.clone()))
+            .expect("No stake found");
+
+        if stake_info.amount <= 0 { panic!("Zero balance"); }
+
+        // Bypassing rewards calculation entirely.
+        // Also bypassing penalty for emergency exit.
+        
+        let final_amount = stake_info.amount;
+
+        let staking_token_addr: Address = env.storage().instance().get(&DataKey::StakingToken).expect("Not init");
+        let token_client = token::Client::new(&env, &staking_token_addr);
+        token_client.transfer(&env.current_contract_address(), &user, &final_amount);
+
+        let total: i128 = env.storage().instance().get(&DataKey::TotalStaked).unwrap_or(0);
+        env.storage().instance().set(&DataKey::TotalStaked, &(total - stake_info.amount));
+        env.storage().persistent().remove(&DataKey::Stake(user.clone()));
+
+        env.events().publish(
+            (Symbol::new(&env, "Unstaked"), user),
             final_amount
         );
 
@@ -187,6 +233,31 @@ impl StakingContract {
     }
 
     // --- Helper Functions ---
+
+    fn calculate_exponential_penalty(amount: i128, max_penalty_bps: i128, elapsed: u64, lock_up_period: u64) -> i128 {
+        if elapsed >= lock_up_period {
+            return 0;
+        }
+
+        let half_life = lock_up_period / 5;
+        if half_life == 0 {
+            return 0;
+        }
+
+        let half_lives = elapsed / half_life;
+        let remainder = elapsed % half_life;
+
+        let mut current_penalty = (amount * max_penalty_bps) / 10000;
+
+        for _ in 0..half_lives {
+            current_penalty /= 2;
+        }
+
+        let decay_for_remainder = (current_penalty / 2) * (remainder as i128) / (half_life as i128);
+        current_penalty -= decay_for_remainder;
+
+        current_penalty
+    }
 
     fn calculate_rewards(env: &Env, stake: &StakeInfo, now: u64) -> i128 {
         if stake.amount <= 0 || now <= stake.last_claim_ts {

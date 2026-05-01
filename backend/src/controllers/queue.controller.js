@@ -22,6 +22,27 @@ async function getStats(req, res) {
 }
 
 /**
+ * Get queue scaling metrics for HPA
+ */
+async function getMetrics(req, res) {
+    try {
+        // We do a lazy require to prevent circular dependencies if scaler isn't fully loaded
+        const { getScalingMetrics } = require('../worker/scaler');
+        const metrics = await getScalingMetrics();
+        res.json({
+            success: true,
+            data: metrics,
+        });
+    } catch (error) {
+        logger.error('Failed to get queue metrics', { error: error.message });
+        res.status(500).json({
+            success: false,
+            error: 'Failed to retrieve queue metrics',
+        });
+    }
+}
+
+/**
  * Get recent jobs
  */
 async function getJobs(req, res) {
@@ -178,6 +199,7 @@ async function retryJob(req, res) {
 
 module.exports = {
     getStats,
+    getMetrics,
     getJobs,
     clean,
     retryJob,

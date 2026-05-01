@@ -77,3 +77,11 @@ class EmailService {
 }
 
 module.exports = new EmailService();
+const sendEventNotification = async ({ trigger, payload }) => {
+    logger.info('Mock email notification', { triggerId: trigger._id, payload });
+    return { success: true };
+};
+
+module.exports = {
+    sendEventNotification
+};
