@@ -37,4 +37,22 @@ router.get('/search', discoveryController.getDiscoveredContracts);
  */
 router.get('/suggestions/:vaultId', discoveryController.getStrategySuggestions);
 
+/**
+ * @openapi
+ * /api/discovery/assign-poller:
+ *   post:
+ *     summary: Assign a poller for an event request
+ *     tags: [Discovery]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *     responses:
+ *       200:
+ *         description: Assigned poller
+ */
+router.post('/assign-poller', discoveryController.assignPoller);
+
 module.exports = router;

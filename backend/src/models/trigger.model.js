@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { encrypt, decrypt } = require('../utils/crypto');
 
 const FILTER_OPERATORS = [
     'eq',
@@ -57,6 +58,12 @@ const triggerSchema = new mongoose.Schema({
     actionUrl: {
         type: String,
         required: true
+    },
+    webhookSecret: {
+        type: String,
+        // Required for webhook actions, but we'll make it optional in schema and validate elsewhere
+        // because other action types don't use it.
+        select: false, // Do not include in query results by default
     },
     isActive: {
         type: Boolean,
@@ -119,6 +126,49 @@ const triggerSchema = new mongoose.Schema({
     filters: {
         type: [filterSchema],
         default: [],
+    },
+    // Custom headers for webhook actions
+    customHeaders: {
+        type: [{
+            key: {
+                type: String,
+                trim: true,
+                required: true
+            },
+            value: {
+                type: String,
+                required: true
+            }
+        }],
+        default: [],
+        validate: {
+            validator: function(arr) {
+                // Validate each header
+                for (const header of arr) {
+                    // Prevent unsafe headers
+                    const unsafeHeaders = ['host', 'content-length', 'content-type', 'user-agent', 'authorization'];
+                    if (unsafeHeaders.includes(header.key.toLowerCase())) {
+                        return false;
+                    }
+                    // Validate key format (alphanumeric, hyphen, underscore)
+                    if (!/^[_a-zA-Z0-9-]+$/.test(header.key)) {
+                        return false;
+                    }
+                }
+                return true;
+            },
+            message: 'Invalid custom header configuration'
+    authConfig: {
+        type: {
+            type: String,
+            enum: ['none', 'oauth2'],
+            default: 'none'
+        },
+        oauth2: {
+            tokenUrl: String,
+            clientId: String,
+            clientSecret: String
+        }
     }
 }, {
     timestamps: true,
@@ -140,6 +190,20 @@ triggerSchema.virtual('healthStatus').get(function() {
     if (score >= 70) return 'degraded';
     return 'critical';
 });
+
+triggerSchema.pre('save', function(next) {
+    if (this.isModified('authConfig.oauth2.clientSecret') && this.authConfig?.oauth2?.clientSecret) {
+        this.authConfig.oauth2.clientSecret = encrypt(this.authConfig.oauth2.clientSecret);
+    }
+    next();
+});
+
+triggerSchema.methods.getDecryptedClientSecret = function() {
+    if (this.authConfig?.type === 'oauth2' && this.authConfig?.oauth2?.clientSecret) {
+        return decrypt(this.authConfig.oauth2.clientSecret);
+    }
+    return null;
+};
 
 const Trigger = mongoose.model('Trigger', triggerSchema);
 

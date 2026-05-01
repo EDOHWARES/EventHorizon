@@ -78,9 +78,14 @@ fn test_simulate_batch() {
     let empty: Vec<Val> = vec![&env];
     let calls: Vec<(u32, Address, Symbol, Vec<Val>)> = vec![
         &env,
-        (1u32, target.clone(), Symbol::new(&env, "ok"),   empty.clone()),
-        (2u32, target.clone(), Symbol::new(&env, "fail"), empty.clone()),
-        (3u32, target.clone(), Symbol::new(&env, "ok"),   empty.clone()),
+        (1u32, target.clone(), Symbol::new(&env, "ok"), empty.clone()),
+        (
+            2u32,
+            target.clone(),
+            Symbol::new(&env, "fail"),
+            empty.clone(),
+        ),
+        (3u32, target.clone(), Symbol::new(&env, "ok"), empty.clone()),
     ];
 
     let results = client.simulate_batch(&calls);
@@ -106,5 +111,8 @@ fn test_budget_is_consumed() {
 
     // After a contract invocation the host budget must show non-zero CPU usage.
     let cpu = env.cost_estimate().budget().cpu_instruction_cost();
-    assert!(cpu > 0, "CPU instructions should be non-zero after simulate");
+    assert!(
+        cpu > 0,
+        "CPU instructions should be non-zero after simulate"
+    );
 }
