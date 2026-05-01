@@ -2,31 +2,39 @@
   "name": "backend",
   "version": "1.0.0",
   "main": "src/server.js",
+  "engines": {
+    "node": "^20 || ^22 || ^24"
+  },
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "test": "node --test",
-    "migrate:audit": "node scripts/migrate-audit.js"
+    "migrate:audit": "node scripts/migrate-audit.js",
+    "start:mtls": "node src/mtls-server.js"
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^12.0.0",
     "axios": "^1.6.0",
     "bcrypt": "^6.0.0",
     "bullmq": "^5.0.0",
+    "consul": "^2.0.1",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "express-rate-limit": "^8.3.1",
     "ioredis": "^5.3.0",
+    "ipaddr.js": "^1.9.1",
     "joi": "^18.1.1",
     "jsonpath-plus": "^10.4.0",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^8.0.0",
     "node-vault": "^0.10.2",
+    "opossum": "^9.0.0",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
-    "nodemon": "^3.0.1"
+    "nodemon": "^3.0.1",
+    "sinon": "^21.1.2"
   }
 }
