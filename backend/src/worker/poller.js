@@ -71,6 +71,7 @@ try {
     });
 
     // Fallback: direct execution with full action routing
+    const axios = require('axios');
     const { sendEventNotification } = require('../services/email.service');
     const { sendDiscordNotification } = require('../services/discord.service');
     const slackService = require('../services/slack.service');
@@ -87,11 +88,13 @@ try {
         });
 
         switch (actionType) {
-            case 'email':
+            case 'email': {
+                const { sendEventNotification } = require('../services/email.service');
                 return await sendEventNotification({
                     trigger,
                     payload: eventPayload,
                 });
+            }
 
             case 'discord':
                 if (!actionUrl) {
