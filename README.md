@@ -18,6 +18,7 @@ EventHorizon is a decentralized "If-This-Then-That" (IFTTT) platform that listen
 -   `/contracts/oracle_aggregator`: Median-of-N price consensus engine.
 -   `/contracts/token_vesting`: Secure token vesting contract with linear release and cliff.
 -   `/contracts/staking`: Reward-based staking contract with early unstake penalties.
+-   `/contracts/reward_pool`: Automated reward pool for high-uptime protocol node operators with penalty logic for missed polling windows.
 
 
 ## 🛠️ Setup & Installation

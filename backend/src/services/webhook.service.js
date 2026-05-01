@@ -1,6 +1,8 @@
 const axios = require('axios');
 const crypto = require('crypto');
 const logger = require('../config/logger');
+const { buildHeaders } = require('../utils/headerBuilder');
+const breakers = require('./circuitBreaker');
 const ipWhitelistService = require('./ipWhitelist.service');
 
 /**
@@ -50,6 +52,12 @@ class WebhookService {
             ...optionHeaders
         };
 
+        // Add custom headers if provided
+        if (options.customHeaders && Array.isArray(options.customHeaders)) {
+            const customHeaders = buildHeaders(options.customHeaders, payload.payload || payload);
+            Object.assign(headers, customHeaders);
+        }
+
         logger.info('Sending signed webhook', {
             url,
             timestamp,
@@ -58,13 +66,19 @@ class WebhookService {
         });
 
         try {
-            const response = await axios.post(url, payload, {
-                headers,
-                timeout: axiosOptions.timeout || 30000, // 30 second timeout
-                httpAgent: destination.agents?.httpAgent,
-                httpsAgent: destination.agents?.httpsAgent,
-                ...axiosOptions
-            });
+            const breakerKey = `webhook:${url}`;
+            const response = await breakers.fire(
+                breakerKey,
+                (postUrl, postPayload, postConfig) => axios.post(postUrl, postPayload, postConfig),
+                [url, payload, {
+                    headers,
+                    timeout: axiosOptions.timeout || 30000, // 30 second timeout
+                    httpAgent: destination.agents?.httpAgent,
+                    httpsAgent: destination.agents?.httpsAgent,
+                    ...axiosOptions
+                }],
+                { timeout: axiosOptions.timeout || 30000 }
+            );
 
             logger.info('Webhook sent successfully', {
                 url,
