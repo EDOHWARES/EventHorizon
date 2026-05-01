@@ -326,4 +326,5 @@ impl LendingProtocol {
     }
 }
 
+pub mod interest_rate_model;
 mod test;
