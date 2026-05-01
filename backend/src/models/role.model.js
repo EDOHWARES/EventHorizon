@@ -21,6 +21,7 @@ const roleSchema = new mongoose.Schema(
         'manage_users',
         'manage_organization',
         'view_audit_logs',
+        'manage_kill_switch',
       ],
     }],
     organization: {

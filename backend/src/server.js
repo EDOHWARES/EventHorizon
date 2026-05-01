@@ -1,7 +1,24 @@
-const mongoose = require('mongoose');
 require('dotenv').config();
+
+// Tracing must be initialized before any instrumented library is required
+// (express, mongoose, ioredis, http) so auto-instrumentation can patch them.
+const tracing = require('./config/tracing');
+tracing.start();
+
+const mongoose = require('mongoose');
 const logger = require('./config/logger');
 const app = require('./app');
+
+if (tracing.getInitError()) {
+    logger.warn('OpenTelemetry initialization failed - tracing disabled', {
+        error: tracing.getInitError().message,
+    });
+} else if (tracing.isInitialized()) {
+    logger.info('OpenTelemetry tracing enabled', {
+        service: tracing.getServiceName(),
+        exporter: process.env.OTEL_EXPORTER || 'otlp',
+    });
+}
 
 const PORT = process.env.PORT || 5000;
 
@@ -63,14 +80,26 @@ mongoose
             logger.error('Vault initialization failed', { error: error.message });
         }
 
+        // Initialize TimescaleDB (optional — skipped when TIMESCALE_URL is not set)
+        try {
+            const timescale = require('./config/timescale');
+            await timescale.connect();
+        } catch (error) {
+            logger.warn('TimescaleDB initialization skipped — execution log persistence disabled', {
+                error: error.message,
+                hint: 'Set TIMESCALE_URL and run scripts/setup-timescale.js to enable',
+            });
+        }
+
         let worker = null;
+        let scaler = null;
 
         try {
-            const { createWorker } = require('./worker/processor');
-            worker = createWorker();
-            logger.info('BullMQ queue system enabled');
+            const { startScaler } = require('./worker/scaler');
+            scaler = startScaler();
+            logger.info('BullMQ worker scaler started');
         } catch (error) {
-            logger.warn('BullMQ worker initialization failed - queue system disabled', {
+            logger.warn('BullMQ worker scaler initialization failed - queue system disabled', {
                 error: error.message,
                 note: 'Install and start Redis to enable background job processing',
             });
@@ -86,6 +115,15 @@ mongoose
                 logger.error('Data retention job failed', { error: error.message });
             });
         }, 24 * 60 * 60 * 1000); // Run daily
+        
+        // Start Health Check Worker
+        try {
+            const healthWorker = require('./worker/health.worker');
+            healthWorker.start();
+            logger.info('Health Check worker started');
+        } catch (error) {
+            logger.error('Failed to start Health Check worker', { error: error.message });
+        }
 
         app.listen(PORT, () => {
             logger.info('Server started successfully', {
@@ -108,11 +146,23 @@ mongoose
                 logger.error('Error flushing batches during shutdown', { error: error.message });
             }
 
-            if (worker) {
-                await worker.close();
+            if (scaler) {
+                await scaler.stop();
             }
 
             await mongoose.connection.close();
+
+            // Close TimescaleDB pool if it was initialised
+            try {
+                const timescale = require('./config/timescale');
+                await timescale.disconnect();
+            } catch (_) {}
+            try {
+                await tracing.shutdown();
+            } catch (error) {
+                logger.error('OpenTelemetry shutdown failed', { error: error.message });
+            }
+
             process.exit(0);
         });
     })

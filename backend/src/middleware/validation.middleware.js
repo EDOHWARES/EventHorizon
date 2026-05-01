@@ -4,6 +4,7 @@ const {
     validateFilters,
     MAX_FILTERS_PER_TRIGGER,
 } = require('../utils/jsonpathValidator');
+const { validateHeaders } = require('../utils/headerBuilder');
 
 const filterSchema = Joi.object({
     path: Joi.string().trim().required(),
@@ -73,6 +74,28 @@ const workflowStepsSchema = Joi.array()
 const workflowConfigSchema = Joi.object({
     continueOnError: Joi.boolean().default(false),
 });
+const headerSchema = Joi.object({
+    key: Joi.string().trim().required().pattern(/^[_a-zA-Z0-9-]+$/),
+    value: Joi.string().required()
+}).custom((value, helpers) => {
+    // Additional validation for unsafe headers
+    const unsafeHeaders = ['host', 'content-length', 'content-type', 'user-agent', 'authorization'];
+    if (unsafeHeaders.includes(value.key.toLowerCase())) {
+        return helpers.error('any.invalid', { message: `Header '${value.key}' is not allowed` });
+    }
+    return value;
+});
+
+const headersSchema = Joi.array()
+    .items(headerSchema)
+    .max(50)
+    .custom((value, helpers) => {
+        const result = validateHeaders(value);
+        if (!result.ok) {
+            return helpers.error('any.invalid', { message: result.error });
+        }
+        return value;
+    }, 'Header security validation');
 
 const cidrSchema = Joi.string().trim().custom((value, helpers) => {
     try {
@@ -132,6 +155,29 @@ const validationSchemas = {
         return value;
     }, 'trigger workflow update validation').messages({
         'any.invalid': '{{#message}}',
+        actionType: Joi.string().valid('webhook', 'discord', 'email', 'telegram').default('webhook'),
+        actionUrl: Joi.string().trim().uri().required(),
+        webhookSecret: Joi.string().when('actionType', {
+            is: 'webhook',
+            then: Joi.required(),
+            otherwise: Joi.optional()
+        }),
+        isActive: Joi.boolean().default(true),
+        lastPolledLedger: Joi.number().integer().min(0).default(0),
+        filters: filtersSchema.default([]),
+        customHeaders: headersSchema.default([]),
+        authConfig: Joi.object({
+            type: Joi.string().valid('none', 'oauth2').default('none'),
+            oauth2: Joi.object({
+                tokenUrl: Joi.string().uri().required(),
+                clientId: Joi.string().required(),
+                clientSecret: Joi.string().required(),
+            }).when('type', {
+                is: 'oauth2',
+                then: Joi.required(),
+                otherwise: Joi.forbidden()
+            })
+        }).optional(),
     }),
     authCredentials: Joi.object({
         email: Joi.string().trim().email().required(),

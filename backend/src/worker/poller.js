@@ -1,14 +1,63 @@
-const { rpc, xdr } = require('@stellar/stellar-sdk');
+const { rpc, xdr, scValToNative } = require('@stellar/stellar-sdk');
 const Trigger = require('../models/trigger.model');
 const batchService = require('../services/batch.service');
 const correlationService = require('../services/correlation.service');
+const deduplication = require('../services/deduplication.service');
 const logger = require('../config/logger');
 const { passesFilters } = require('../utils/filterEvaluator');
+const { withSpan, setAttributes } = require('../utils/tracing');
+
+// Execution log persistence — optional; silently disabled when TimescaleDB is not configured
+let executionLogService = null;
+try {
+    executionLogService = require('../services/executionLog.service');
+} catch (_) {
+    // service unavailable — logging will be skipped
+}
 
 const RPC_URL = process.env.SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org';
 const server = new rpc.Server(RPC_URL, {
     timeout: parseInt(process.env.RPC_TIMEOUT_MS || '10000', 10),
 });
+
+/**
+ * Decodes a Soroban event into a more usable format.
+ * Extracts the event name from the first topic.
+ */
+function decodeEvent(rawEvent) {
+    const event = { ...rawEvent };
+    
+    // If topics are present, the first topic is usually the event name
+    if (event.topic && Array.isArray(event.topic) && event.topic.length > 0) {
+        try {
+            // Decode the first topic (event name)
+            // Note: The RPC returns Base64 XDR by default
+            const topicXdr = xdr.ScVal.fromXDR(event.topic[0], 'base64');
+            const nativeTopic = scValToNative(topicXdr);
+            
+            if (typeof nativeTopic === 'string') {
+                event.eventName = nativeTopic;
+            } else if (typeof nativeTopic === 'object' && nativeTopic !== null) {
+                // Handle cases where the name might be a symbol or similar
+                event.eventName = nativeTopic.toString();
+            }
+        } catch (e) {
+            logger.debug('Failed to decode event topic as name', { error: e.message });
+        }
+    }
+
+    // Decode the value if it's in XDR
+    if (event.value && event.value.xdr) {
+        try {
+            const valueXdr = xdr.ScVal.fromXDR(event.value.xdr, 'base64');
+            event.payload = scValToNative(valueXdr);
+        } catch (e) {
+            logger.debug('Failed to decode event value', { error: e.message });
+        }
+    }
+
+    return event;
+}
 
 // --- Configuration ---
 const MAX_LEDGERS_PER_POLL = parseInt(process.env.MAX_LEDGERS_PER_POLL || '10000', 10);
@@ -76,6 +125,16 @@ try {
 
     enqueueAction = async function executeTriggerActionDirect(trigger, eventPayload) {
         const { actionType, contractId, eventName } = trigger;
+    const axios = require('axios');
+    const { sendEventNotification } = require('../services/email.service');
+    const { sendDiscordNotification } = require('../services/discord.service');
+    const slackService = require('../services/slack.service');
+    const telegramService = require('../services/telegram.service');
+    const webhookService = require('../services/webhook.service');
+
+    enqueueAction = async function executeTriggerActionDirect(trigger, eventPayload) {
+        const { actionType, actionUrl, contractId, eventName } = trigger;
+        const startTime = Date.now();
 
         logger.info('Executing action directly (no queue)', {
             actionType,
@@ -85,6 +144,107 @@ try {
 
         if (trigger.steps?.length > 0) {
             return await executeWorkflow(trigger, eventPayload);
+        try {
+            let result;
+        switch (actionType) {
+            case 'email': {
+                const { sendEventNotification } = require('../services/email.service');
+                return await sendEventNotification({
+                    trigger,
+                    payload: eventPayload,
+                });
+            }
+
+            switch (actionType) {
+                case 'email':
+                    result = await sendEventNotification({
+                        trigger,
+                        payload: eventPayload,
+                    });
+                    break;
+
+                case 'discord': {
+                    if (!actionUrl) {
+                        throw new Error('Missing actionUrl for Discord trigger');
+                    }
+                    const discordPayload = {
+                        embeds: [{
+                            title: `Event: ${eventName}`,
+                            description: `Contract: ${contractId}`,
+                            fields: [{
+                                name: 'Payload',
+                                value: `\`\`\`json\n${JSON.stringify(eventPayload, null, 2).slice(0, 1000)}\n\`\`\``,
+                            }],
+                            color: 0x5865F2,
+                            timestamp: new Date().toISOString(),
+                        }],
+                    };
+                    result = await sendDiscordNotification(actionUrl, discordPayload);
+                    break;
+                }
+
+                case 'slack':
+                    result = await slackService.execute(trigger, eventPayload);
+                    break;
+
+                case 'telegram': {
+                    const botToken = process.env.TELEGRAM_BOT_TOKEN;
+                    const chatId = actionUrl; // actionUrl stores the chat ID for telegram triggers
+                    if (!botToken || !chatId) {
+                        throw new Error('Missing TELEGRAM_BOT_TOKEN or actionUrl (chatId) for telegram trigger');
+                    }
+                    const message = [
+                        '🔔 *EventHorizon Alert*',
+                        '',
+                        `*Event:* ${telegramService.escapeMarkdownV2(eventName)}`,
+                        `*Contract:* \`${telegramService.escapeMarkdownV2(contractId)}\``,
+                        '',
+                        '```json',
+                        telegramService.escapeMarkdownV2(JSON.stringify(eventPayload, null, 2)),
+                        '```',
+                    ].join('\n');
+                    result = await telegramService.sendTelegramMessage(botToken, chatId, message);
+                    break;
+                }
+
+                case 'webhook': {
+                    if (!actionUrl) {
+                        throw new Error('Missing actionUrl for webhook trigger');
+                    }
+                    result = await webhookService.sendSignedWebhook(actionUrl, {
+                        contractId,
+                        eventName,
+                        payload: eventPayload,
+                    }, trigger.webhookSecret, { organizationId: trigger.organization });
+                    break;
+                }
+
+                default:
+                    throw new Error(`Unsupported action type: ${actionType}`);
+            }
+
+            // Log success to TimescaleDB (fire-and-forget)
+            if (executionLogService) {
+                executionLogService.logSuccess(trigger, {
+                    durationMs: Date.now() - startTime,
+                    ledgerSequence: eventPayload && eventPayload.ledger,
+                    payloadSnapshot: eventPayload,
+                    source: 'direct',
+                }).catch(() => {});
+            }
+
+            return result;
+        } catch (err) {
+            // Log failure to TimescaleDB (fire-and-forget)
+            if (executionLogService) {
+                executionLogService.logFailure(trigger, err, {
+                    durationMs: Date.now() - startTime,
+                    ledgerSequence: eventPayload && eventPayload.ledger,
+                    payloadSnapshot: eventPayload,
+                    source: 'direct',
+                }).catch(() => {});
+            }
+            throw err;
         }
 
         return await executeSingleAction(trigger, eventPayload);
@@ -123,8 +283,15 @@ async function processEvent(trigger, eventPayload) {
 // --- Core Polling Logic ---
 
 async function pollEvents() {
+    return withSpan('stellar.poll.cycle', async () => pollEventsImpl(), {
+        'rpc.url': RPC_URL,
+    });
+}
+
+async function pollEventsImpl() {
     try {
         const triggers = await Trigger.find({ isActive: true });
+        setAttributes({ 'poll.active_triggers': triggers.length });
 
         if (triggers.length === 0) {
             logger.debug('No active triggers found for polling');
@@ -159,13 +326,14 @@ async function pollEvents() {
             const contractTriggers = triggersByContract[contractId];
             logger.debug(`Polling for contract: ${contractId}, triggers: ${contractTriggers.length}`);
 
+            await withSpan('stellar.poll.contract', async () => {
             try {
                 // Determine ledger bounds based on the furthest behind trigger
                 let startLedger = Math.max(...contractTriggers.map(t => t.lastPolledLedger || 0));
                 if (startLedger === 0) {
                     startLedger = Math.max(1, latestLedgerSequence - 100);
                 } else {
-                    if (startLedger >= latestLedgerSequence) continue;
+                    if (startLedger >= latestLedgerSequence) return;
                     startLedger += 1;
                 }
 
@@ -189,14 +357,17 @@ async function pollEvents() {
                     }));
 
                     if (response && response.events && response.events.length > 0) {
-                        for (const event of response.events) {
-                            if (event.ledger > endLedger) break;
+                        for (let rawEvent of response.events) {
+                            if (rawEvent.ledger > endLedger) break;
+
+                            const event = decodeEvent(rawEvent);
 
                             for (const trigger of contractTriggers) {
                                 try {
                                     if (trigger.sequence) {
                                         const result = await correlationService.checkSequence(trigger, event);
                                         if (result.shouldFire) {
+                                            if (await deduplication.isDuplicate(trigger._id, event)) continue;
                                             await processEvent(trigger, result.eventPayload);
                                             trigger.totalExecutions = (trigger.totalExecutions || 0) + 1;
                                             trigger.lastSuccessAt = new Date();
@@ -204,6 +375,7 @@ async function pollEvents() {
                                         }
                                     } else {
                                         if (event.eventName === trigger.eventName && passesFilters(event, trigger.filters)) {
+                                            if (await deduplication.isDuplicate(trigger._id, event)) continue;
                                             await processEvent(trigger, event);
                                             trigger.totalExecutions = (trigger.totalExecutions || 0) + 1;
                                             trigger.lastSuccessAt = new Date();
@@ -218,6 +390,19 @@ async function pollEvents() {
                                         error: error.message,
                                         eventLedger: event.ledger,
                                     });
+                                    // Record in DLQ for later re-driving
+                                    try {
+                                        const dlqService = require('../services/dlq.service');
+                                        await dlqService.recordFailure({
+                                            triggerId: trigger._id,
+                                            triggerSnapshot: trigger.toObject ? trigger.toObject() : trigger,
+                                            eventPayload: event,
+                                            errorMessage: error.message,
+                                            attemptsMade: (trigger.retryConfig?.maxRetries || 3) + 1,
+                                        });
+                                    } catch (dlqErr) {
+                                        logger.error('Failed to record failure in DLQ', { error: dlqErr.message });
+                                    }
                                 }
                             }
                         }
@@ -252,6 +437,7 @@ async function pollEvents() {
             } catch (contractError) {
                 logger.error(`Error processing contract ${contractId}:`, { error: contractError.message });
             }
+            }, { 'stellar.contract_id': contractId, 'stellar.trigger_count': contractTriggers.length });
 
             await sleep(INTER_TRIGGER_DELAY_MS);
         }

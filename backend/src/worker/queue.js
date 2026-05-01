@@ -1,11 +1,16 @@
 const { Queue } = require('bullmq');
-const Redis = require('ioredis');
 const networks = require('../config/networks');
+const { createRedisClient } = require('../config/redis');
+
+const connection = createRedisClient({ lazyConnect: true, maxRetriesPerRequest: null });
+const { injectContextIntoCarrier } = require('../utils/tracing');
 
 const connection = new Redis({
     host: process.env.REDIS_HOST || 'localhost',
     port: process.env.REDIS_PORT || 6379,
     password: process.env.REDIS_PASSWORD || undefined,
+    lazyConnect: true,
+    maxRetriesPerRequest: null
 });
 
 const queues = {};
@@ -32,6 +37,26 @@ const enqueueAction = async (trigger, eventPayload) => {
     await queue.add(
         jobName,
         { trigger, eventPayload },
+
+    const _traceContext = injectContextIntoCarrier({});
+
+    await queue.add(
+        `${trigger.actionType}-${trigger._id}`,
+        { trigger, eventPayload, _traceContext },
+        {
+            attempts: trigger.retryConfig?.maxRetries || 3,
+            backoff: { type: 'exponential', delay: trigger.retryConfig?.retryIntervalMs || 2000 }
+        }
+    );
+};
+
+const enqueueBatchAction = async (trigger, eventPayloads) => {
+    const network = trigger.network || 'testnet';
+    const queue = getActionQueue(network);
+    
+    await queue.add(
+        `${trigger.actionType}-${trigger._id}-batch-${Date.now()}`, 
+        { trigger, eventPayloads, isBatch: true },
         {
             attempts: trigger.retryConfig?.maxRetries || 3,
             backoff: { type: 'exponential', delay: trigger.retryConfig?.retryIntervalMs || 2000 }
@@ -55,3 +80,4 @@ const cleanQueue = async () => {
 };
 
 module.exports = { getActionQueue, enqueueAction, getQueueStats, cleanQueue, queues };
+module.exports = { getActionQueue, enqueueAction, enqueueBatchAction, getQueueStats, cleanQueue, queues };
